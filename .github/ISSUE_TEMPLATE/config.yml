@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Docs — what autoloop is and how to install it
+    url: https://github.com/sweekuh/autoloop#readme
+    about: Read the README first; it covers install, the phases, and self-updating.

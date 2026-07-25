@@ -1,0 +1,10 @@
+# Normalize line endings: store and check out LF for every text file, on every
+# platform. Keeps the Python/shell helpers running cleanly on macOS/Linux and
+# stops CRLF churn when Windows contributors touch them.
+* text=auto eol=lf
+
+# Be explicit for the executable helpers.
+*.py  text eol=lf
+*.sh  text eol=lf
+*.json text eol=lf
+*.md  text eol=lf

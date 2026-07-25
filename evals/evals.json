@@ -1,0 +1,219 @@
+{
+  "skill_name": "autoloop",
+  "evals": [
+    {
+      "id": 0,
+      "eval_name": "objective-metric-happy-path",
+      "prompt": "I have a repo at /tmp/sortproj with slow_sort.py and bench.py. Running `python3 bench.py` prints a line like `runtime_ms: 842.3`. Use autoloop to make the sort faster. Stop when improvements dry up — say patience 4 and no more than 12 trials.",
+      "expected_output": "Full loop run: config written, baseline logged, multiple trials with keep/revert, stop triggered by check_stop.py, final report with recipe and delta",
+      "files": [
+        "/tmp/sortproj/slow_sort.py",
+        "/tmp/sortproj/bench.py"
+      ],
+      "assertions": [
+        {
+          "text": "loop_config.json exists and contains mutable_paths, eval_command, metric_extract, direction, patience, max_trials",
+          "type": "mechanical"
+        },
+        {
+          "text": "results.tsv exists with header + trial 0 logged as baseline with status keep",
+          "type": "mechanical"
+        },
+        {
+          "text": "results.tsv contains at least 4 trials beyond baseline",
+          "type": "mechanical"
+        },
+        {
+          "text": "results.tsv is untracked by git (never committed)",
+          "type": "mechanical"
+        },
+        {
+          "text": ".gitignore contains results.tsv and run.log, committed before first trial",
+          "type": "mechanical"
+        },
+        {
+          "text": "Every discard row corresponds to a git revert: number of commits on autoloop branch equals number of keep rows (+setup commits)",
+          "type": "mechanical"
+        },
+        {
+          "text": "Loop terminated because check_stop.py returned stop=true, and its verdict is quoted in the report",
+          "type": "mechanical"
+        },
+        {
+          "text": "Final best runtime_ms is lower than or equal to baseline runtime_ms",
+          "type": "mechanical"
+        },
+        {
+          "text": "Report contains kept-changes recipe, discard themes, and a further-budget verdict",
+          "type": "judgment"
+        },
+        {
+          "text": "Guard-violation trial (primary improved, counter-metric broken) logged as discard with guard-violation prefix and reverted",
+          "type": "mechanical"
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "eval_name": "judged-metric-warning-and-hardening",
+      "prompt": "I want to iteratively improve the system prompt in /tmp/promptproj/agent_prompt.md so the agent's answers get better. There's no benchmark — quality would have to be scored by an LLM judge. Set up an autoloop run for this.",
+      "expected_output": "Explicit Goodhart warning before any looping; offer of a deterministic alternative; if user accepts judged metric, judge prompt frozen and committed before loop, judge isolated from history, anchored rubric",
+      "files": [
+        "/tmp/promptproj/agent_prompt.md"
+      ],
+      "assertions": [
+        {
+          "text": "Response warns explicitly about judged-metric gaming (Goodhart) BEFORE any loop starts",
+          "type": "judgment"
+        },
+        {
+          "text": "Response proposes a deterministic metric alternative before defaulting to the judge",
+          "type": "judgment"
+        },
+        {
+          "text": "Setup includes committing a frozen judge prompt file prior to trial 1",
+          "type": "mechanical"
+        },
+        {
+          "text": "Judge scoring design isolates each trial (no history, no prior scores)",
+          "type": "judgment"
+        },
+        {
+          "text": "loop_config.json sets judge_metric to true",
+          "type": "mechanical"
+        },
+        {
+          "text": "No loop iterations run before the user acknowledges the risk",
+          "type": "judgment"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "eval_name": "unqualifiable-task-gate",
+      "prompt": "Use autoloop on my resume at /tmp/resume/resume.md — just keep iterating on it until it's as good as it can get.",
+      "expected_output": "No loop starts. Phase 0 qualification runs, identifies the missing frozen evaluator and scalar metric, and either proposes concrete metric options or states the task does not fit",
+      "files": [
+        "/tmp/resume/resume.md"
+      ],
+      "assertions": [
+        {
+          "text": "No results.tsv, no loop_config.json committed, no trials executed",
+          "type": "mechanical"
+        },
+        {
+          "text": "Response identifies the specific missing property (frozen evaluator / scalar metric)",
+          "type": "judgment"
+        },
+        {
+          "text": "Response proposes concrete paths to a metric or clearly states the task does not fit the loop",
+          "type": "judgment"
+        },
+        {
+          "text": "Response does not fake rigor by inventing an unmeasurable vibes metric and looping on it",
+          "type": "judgment"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "eval_name": "parallel-mode-claude-code-manual",
+      "prompt": "In a Claude Code session on a repo with a benchmark script: 'Use autoloop with 4 parallel trials per round to optimize <artifact>. Patience 5 rounds.'",
+      "expected_output": "Manual checklist for Zach to verify in Claude Code",
+      "files": [],
+      "runner": "manual-claude-code",
+      "assertions": [
+        {
+          "text": "Each round spawns exactly K subagents, one per candidate, each in its own git worktree created from the current best commit",
+          "type": "manual"
+        },
+        {
+          "text": "The K ideas per round are mechanistically diverse (not K values of one knob)",
+          "type": "manual"
+        },
+        {
+          "text": "Subagents return only extracted metric lines + one-line summary; no raw logs in parent context",
+          "type": "manual"
+        },
+        {
+          "text": "results.tsv gets K rows per round sharing a round number; at most one keep per round",
+          "type": "manual"
+        },
+        {
+          "text": "check_stop.py reports patience_unit=rounds and stops after N failed rounds, not N failed trials",
+          "type": "manual"
+        },
+        {
+          "text": "Worktrees are removed after each round; loop branch history contains only kept commits + setup",
+          "type": "manual"
+        },
+        {
+          "text": "One subagent crash or timeout does not sink the round (crash row logged, round adjudicated from survivors)",
+          "type": "manual"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "eval_name": "self-update-before-phase0",
+      "prompt": "In a Claude Code session with the autoloop skill installed as a git checkout: first put the checkout one commit behind its upstream but clean (git fetch; git reset --hard @{u}~1, staying on a commit that still contains scripts/update_check.py). Then invoke autoloop on any task, e.g. the sortproj benchmark.",
+      "expected_output": "Before Phase 0 qualification, the skill runs scripts/update_check.py; on a cleanly-behind checkout it fast-forwards to upstream and re-reads SKILL.md; on dirty or diverged states it reports and modifies nothing; it never hard-blocks a run by itself; its output is pure ASCII.",
+      "files": [],
+      "runner": "manual-claude-code",
+      "assertions": [
+        {
+          "text": "Before any Phase 0 qualification, the skill runs `python <skill_dir>/scripts/update_check.py` and acts on its final JSON verdict",
+          "type": "manual"
+        },
+        {
+          "text": "Behind + clean: update_check.py prints status updated / action fast-forwarded, and afterward `git rev-parse HEAD` equals `git rev-parse @{u}`",
+          "type": "mechanical"
+        },
+        {
+          "text": "Up to date: the verdict status is up-to-date",
+          "type": "mechanical"
+        },
+        {
+          "text": "Behind with an uncommitted change: verdict status is behind-dirty / action manual, and the checkout HEAD is unchanged",
+          "type": "mechanical"
+        },
+        {
+          "text": "A local commit not on the upstream: verdict status is diverged / action manual, and the checkout HEAD is unchanged",
+          "type": "mechanical"
+        },
+        {
+          "text": "Detached HEAD or a branch with no tracking config: verdict status is no-upstream AND HEAD is unmoved (a deliberate pin to an audited commit must survive the check)",
+          "type": "mechanical"
+        },
+        {
+          "text": "Run from a copy whose parent directory has no .git: verdict status is not-git and exit code is 0",
+          "type": "mechanical"
+        },
+        {
+          "text": "With git absent from PATH: verdict status is not-git and exit code is 0",
+          "type": "mechanical"
+        },
+        {
+          "text": "An unknown flag (e.g. --dry-run) exits nonzero instead of silently performing a real update",
+          "type": "mechanical"
+        },
+        {
+          "text": "Unreachable remote: verdict status is offline",
+          "type": "mechanical"
+        },
+        {
+          "text": "On an offline verdict the skill proceeds on the local version rather than blocking the run",
+          "type": "manual"
+        },
+        {
+          "text": "scripts/update_check.py output is pure ASCII (no byte > 127), guarding the non-UTF-8-console fix",
+          "type": "mechanical"
+        },
+        {
+          "text": "On behind-dirty or diverged, the skill surfaces the printed fix command and asks before proceeding on a stale version instead of silently looping",
+          "type": "judgment"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+name: checks
+
+# The eval suite (evals/evals.json) needs an LLM grading harness and cannot run
+# here. This runs the mechanical checks that can: helpers compile and behave,
+# the machine-readable listings parse and stay in sync, output stays ASCII.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # The skill runs on contributors' and users' machines, not a server, so
+        # check the three platforms they actually install it on.
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Run mechanical checks
+        run: python tests/check.py
