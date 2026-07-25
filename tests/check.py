@@ -126,6 +126,19 @@ check("CONTRIBUTING documents the frozen harness",
 check("SKILL.md still shells out to check_stop.py",
       "scripts/check_stop.py" in read("SKILL.md"))
 
+# 8. Per-run results filename. A single shared results.tsv means the next run in
+#    the same project truncates the previous run's log, which is the one piece of
+#    the trajectory git does not already keep (loop_config.json is committed).
+_skill = read("SKILL.md")
+check("SKILL.md creates a per-run results file",
+      "results-<run_tag>.tsv" in _skill)
+check("SKILL.md does not create a shared results.tsv",
+      "Create `results.tsv`" not in _skill)
+check("SKILL.md check_stop invocation uses the per-run filename",
+      "--results results-<run_tag>.tsv" in _skill)
+check("SKILL.md Phase 0 reads prior runs",
+      "results-*.tsv" in _skill)
+
 print()
 if failures:
     print(f"{len(failures)} check(s) failed: " + ", ".join(failures))

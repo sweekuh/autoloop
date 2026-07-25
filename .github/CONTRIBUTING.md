@@ -66,4 +66,4 @@ If you change loop behavior, add or update a case in the one that fits, and say 
 
 ## Reporting bugs & sharing runs
 
-Use the [issue templates](ISSUE_TEMPLATE/). A shared `loop_config.json` + the relevant `results.tsv` rows makes almost any report actionable. Runs where a **counter-metric gate correctly bit** are especially valuable — they show the discipline working.
+Use the [issue templates](ISSUE_TEMPLATE/). A shared `loop_config.json` + the relevant `results-<run_tag>.tsv` rows makes almost any report actionable. Runs where a **counter-metric gate correctly bit** are especially valuable — they show the discipline working.

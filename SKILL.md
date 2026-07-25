@@ -67,6 +67,28 @@ Establish these from conversation context where possible, by asking where not:
 - **Counter-metrics**: at least one, each with extraction pattern, direction, and hard threshold.
 - **Trial cost**: wall-clock and money per trial.
 - **Budget**: max rounds, and `candidates_per_round` if running candidates in parallel.
+- **Run tag**: short, and **unique within this project**. It names the branch and the results file, so reusing a previous run's tag overwrites that run's log. Check for existing `results-*.tsv` first and pick a different tag on collision.
+
+### Read the project's prior runs
+
+Before qualifying, look for earlier runs in this project and read them if they exist:
+
+```bash
+ls results-*.tsv 2>/dev/null
+git log --oneline autoloop/* 2>/dev/null
+```
+
+Read at most the **3 most recent** `results-*.tsv` files, newest first. They are full trial logs and will flood context if you read every run in a long-lived project.
+
+What prior runs are good for:
+
+- **Dead ends.** Candidate descriptions with `discard`, `gate_fail`, or `crash` status are things already tried here. Do not spend budget rediscovering them.
+- **Which gates actually bite** on this codebase, and what thresholds held.
+- **Rough cost.** How many rounds prior runs took before progress flattened.
+
+What they are **not** good for: setting `patience`, `epsilon_window`, or `max_rounds`. A run stopped by `patience` ends with exactly that many barren rounds by construction, so a gap longer than the current setting is unobservable. Any number derived from stopped runs restates the setting rather than testing it, and repeating that reasoning ratchets `patience` toward the broken zone described in "Escaping local optima." Propose stopping-rule values from the task, not from history.
+
+Report what you found in one line ("3 prior runs here; memoization and early-exit already failed; tests gate bit twice") and carry on. Prior runs are evidence for the user, never an automatic config change.
 
 ### LLM-judged metrics: warn, then harden
 
@@ -128,7 +150,7 @@ Then:
 
 1. Create branch `autoloop/<run_tag>`. If the directory is not a git repo, `git init` and commit first, because revertibility is load-bearing.
 2. Commit `loop_config.json` and the judge prompt if there is one.
-3. Create `results.tsv` with only this header, tab-separated because commas break inside descriptions:
+3. Create `results-<run_tag>.tsv` with only this header, tab-separated because commas break inside descriptions. **Substitute the actual tag in the filename** - a run tagged `jul23` writes `results-jul23.tsv`, never a literal `results-<run_tag>.tsv`. The per-run filename is what stops the next run in this project from destroying this one's log:
 
 ```
 round	candidate	commit	primary	counters	status	description
@@ -150,7 +172,7 @@ Each round produces `candidates_per_round` candidates, evaluates them, and keeps
 
 ### Generating candidates
 
-Before proposing anything, read **all** of `results.tsv`, including discards, gate failures, and crashes. Deduplicating against everything seen rather than only against keeps is what stops the loop from paying repeatedly to rediscover the same dead ends. A candidate that restates a logged failure is wasted budget.
+Before proposing anything, read **all** of this run's `results-<run_tag>.tsv`, including discards, gate failures, and crashes. Deduplicating against everything seen rather than only against keeps is what stops the loop from paying repeatedly to rediscover the same dead ends. A candidate that restates a logged failure is wasted budget.
 
 Prefer the simplest change that could plausibly move the primary metric. When a round runs more than one candidate, make them genuinely different from each other, since several variations on one idea buy almost nothing over a single trial.
 
@@ -168,12 +190,12 @@ Running N candidates in parallel explores less efficiently per token than runnin
 2. Any candidate violating a counter-metric gate is `gate_fail`, regardless of how good its primary looks. Log which gate and by how much. These rows are valuable: they map the boundary of the search space.
 3. Among survivors, take the best primary. If it beats best-so-far in the configured direction, keep it: merge that worktree's diff onto the branch and commit. Every other candidate in the round is `discard`.
 4. If no survivor beats best-so-far, the round keeps nothing. Reset the branch to the last kept commit.
-5. Append one row per candidate to `results.tsv`. Do not commit `results.tsv`, so that reverts never touch the log.
+5. Append one row per candidate to `results-<run_tag>.tsv`. Do not commit it, so that reverts never touch the log.
 
 ### Checking whether to stop
 
 ```bash
-python <skill_dir>/scripts/check_stop.py --config loop_config.json --results results.tsv
+python <skill_dir>/scripts/check_stop.py --config loop_config.json --results results-<run_tag>.tsv
 ```
 
 The script prints a JSON verdict. The script decides, and the loop obeys it.
@@ -202,7 +224,7 @@ Once the loop begins, do not pause to ask whether to continue, whether the curre
 - **Budget verdict**: given the trajectory, is more search likely to pay? "No" is a common and correct answer.
 - If `judge_metric` is true: state that scores are judge-panel medians, report any drift flagged during the run, and recommend human review of the top candidates.
 
-Leave the branch, `results.tsv`, `run.log`, and `loop_config.json` in place as the audit trail.
+Leave the branch, `results-<run_tag>.tsv`, `run.log`, and `loop_config.json` in place as the audit trail. The per-run filename means this log survives the next run in the same project, so a later run can read it.
 
 ---
 

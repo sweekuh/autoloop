@@ -20,7 +20,7 @@ Every run also declares a counter-metric: something the loop is forbidden to mak
 ## How a run goes
 
 - **Phase 0, qualify.** Goal, mutable paths, eval command, primary metric, counter-metrics, budget. This is where it refuses if the task doesn't fit.
-- **Phase 1, contract.** Writes `loop_config.json`, creates the `autoloop/<run_tag>` branch and `results.tsv`, waits for your sign-off.
+- **Phase 1, contract.** Writes `loop_config.json`, creates the `autoloop/<run_tag>` branch and `results-<run_tag>.tsv`, waits for your sign-off.
 - **Phase 2, baseline.** Evaluates the artifact untouched, and calibrates the counter-metric thresholds against what it measures.
 - **Phase 3, loop.** Each round proposes candidates, evaluates them with the frozen harness, keeps at most one, and logs all of them including the failures.
 - **Phase 4, report.** Baseline against best, the ordered list of kept commits so the win can be reproduced without rerunning the search, which gates blocked which candidates, and whether more search is worth paying for.
@@ -57,7 +57,7 @@ On Windows that path is `%USERPROFILE%\.claude\skills\autoloop`. Claude Code the
 
 ## Usage
 
-Run `/autoloop`, or just describe what you want optimized. It triggers on phrasings like "optimize X until it plateaus", "hill-climb on this", or "try a bunch of variants and keep the best". It walks you through Phase 0, gets your sign-off on the config, then runs unattended until the stopping rule fires. The branch, `results.tsv`, `run.log`, and `loop_config.json` stay where they are as the audit trail.
+Run `/autoloop`, or just describe what you want optimized. It triggers on phrasings like "optimize X until it plateaus", "hill-climb on this", or "try a bunch of variants and keep the best". It walks you through Phase 0, gets your sign-off on the config, then runs unattended until the stopping rule fires. The branch, `results-<run_tag>.tsv`, `run.log`, and `loop_config.json` stay where they are as the audit trail. The per-run filename means a later run in the same project can read what earlier ones tried.
 
 ## Self-updating
 
@@ -87,7 +87,7 @@ evals/evals.json         eval suite, skill-creator format
 
 ## Contributing
 
-Issues are welcome, especially runs that went badly. If you have used it on something, the most useful thing to post is your `loop_config.json` plus the rows of `results.tsv` around whatever went wrong. Runs where a counter-metric gate correctly blocked a "winning" candidate are worth sharing too, since they show the gates earning their place.
+Issues are welcome, especially runs that went badly. If you have used it on something, the most useful thing to post is your `loop_config.json` plus the rows of `results-<run_tag>.tsv` around whatever went wrong. Runs where a counter-metric gate correctly blocked a "winning" candidate are worth sharing too, since they show the gates earning their place.
 
 [CONTRIBUTING.md](.github/CONTRIBUTING.md) covers the dev loop, the pre-PR checks, and the one invariant that cannot break: the harness stays frozen.
 
