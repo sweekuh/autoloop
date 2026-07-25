@@ -38,4 +38,4 @@ round	candidate	commit	primary	counters	status	description
 - Update-check verdict at run start (the `update_check.py` line), if you have it:
 
 **Anything else**
-<!-- Was the metric LLM-judged? Was λ > 1 / worktree isolation on? Screenshots or a run.log tail help. -->
+<!-- Was the metric LLM-judged? Was `candidates_per_round` > 1 / worktree isolation on? Screenshots or a run.log tail help. -->

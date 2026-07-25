@@ -39,7 +39,7 @@ There's no build step or package manifest — the executable code is `scripts/ch
 
 This is the load-bearing invariant of the whole skill (stated explicitly in the script's own docstring): the stop/continue decision has to be read-only ground truth the loop being evaluated cannot influence, or every run will report that it's still improving. Implementation details that matter if you touch this file:
 
-- It groups `results.tsv` rows by the `round` column, not raw candidate rows — with `lambda > 1` a round has several candidate rows but at most one `keep`, so counting raw rows would make `patience` fire `lambda` times too early.
+- It groups `results.tsv` rows by the `round` column, not raw candidate rows — with `candidates_per_round > 1` a round has several candidate rows but at most one `keep`, so counting raw rows would make `patience` fire once per candidate instead of once per round.
 - The three stop conditions are checked in this order, first to fire wins: `max_rounds` (hard cap) → `patience` (consecutive keepless rounds) → `epsilon`/`epsilon_window` (diminishing returns over the trailing window).
 - It's backward compatible on purpose: falls back to the legacy `metric` column name if `primary` is absent, and treats each row as its own round if `results.tsv` has no `round` column.
 

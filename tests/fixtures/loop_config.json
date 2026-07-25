@@ -17,7 +17,7 @@
       "comparator": ">="
     }
   ],
-  "lambda": 1,
+  "candidates_per_round": 1,
   "worktree_isolation": false,
   "trial_timeout_seconds": 600,
   "max_rounds": 40,

@@ -6,7 +6,7 @@ Setup for cases 1 and 4 requires a toy problem with a **real plateau**, otherwis
 
 ---
 
-## Case 1: objective metric, sequential (lambda=1)
+## Case 1: objective metric, sequential (one candidate per round)
 
 **Prompt**
 > I have a repo at ./sortproj with sorter.py and bench.py. `python3 bench.py` prints `runtime_ms: 842.3` and `tests_passed: 42`. Use autoloop to make it faster, patience 4, max 12 rounds. Tests must never drop below 42.
@@ -65,13 +65,13 @@ Note the prompt does **not** mention tests. The skill has to introduce the count
 
 ---
 
-## Case 4: lambda-parallel rounds
+## Case 4: parallel candidates per round
 
 **Prompt**
 > Same sortproj task, but run 4 candidates per round in parallel so it goes faster overnight. 10 rounds max.
 
 **Must hold**
-- `lambda: 4` and `worktree_isolation: true` in config
+- `candidates_per_round: 4` and `worktree_isolation: true` in config
 - each candidate ran in its own git worktree
 - `results.tsv` has ~4 candidate rows per round sharing a round number
 - at most one `keep` per round
@@ -132,7 +132,7 @@ Tests the update check baked into the skill (`scripts/update_check.py`, invoked 
     {"id": 1, "eval_name": "objective-sequential", "runtime": "claude-code", "needs_setup": "sortproj toy repo with plateau"},
     {"id": 2, "eval_name": "counter-metric-gate", "runtime": "claude-code", "needs_setup": "sortproj toy repo with plateau"},
     {"id": 3, "eval_name": "judged-metric-panel", "runtime": "claude-code", "needs_setup": "promptproj with agent_prompt.md"},
-    {"id": 4, "eval_name": "lambda-parallel-rounds", "runtime": "claude-code", "needs_setup": "sortproj toy repo with plateau"},
+    {"id": 4, "eval_name": "parallel-candidate-rounds", "runtime": "claude-code", "needs_setup": "sortproj toy repo with plateau"},
     {"id": 5, "eval_name": "refuse-unqualifiable", "runtime": "any", "needs_setup": "resume.md"},
     {"id": 6, "eval_name": "self-update-before-phase0", "runtime": "claude-code", "needs_setup": "skill checkout placed in a known behind/dirty/diverged state"}
   ]

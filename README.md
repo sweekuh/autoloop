@@ -27,7 +27,7 @@ Every run also declares a counter-metric: something the loop is forbidden to mak
 
 `scripts/check_stop.py` decides when to stop and the loop obeys it. Three conditions, first to fire wins: patience (N rounds with no keep), epsilon (gain across a trailing window drops below a threshold), and max_rounds. It lives in a separate script for the same reason the evaluator is frozen. Having just generated the ideas, the loop always feels one change away from a breakthrough.
 
-One candidate per round is the default. Set `lambda` above 1 and each candidate gets its own git worktree, which buys wall-clock time and costs sample efficiency, since candidates in the same round can't learn from each other's results.
+One candidate per round is the default. Raise `candidates_per_round` above 1 and each candidate gets its own git worktree, which buys wall-clock time and costs sample efficiency, since candidates in the same round can't learn from each other's results.
 
 ## Requirements
 

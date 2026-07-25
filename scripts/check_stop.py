@@ -4,9 +4,10 @@
 Reads loop_config.json and results.tsv, prints a JSON verdict:
   {"stop": bool, "reason": str, "stats": {...}}
 
-Rounds, not candidates, are the unit of progress. With lambda > 1 a single
-round contains several candidate rows and keeps at most one, so counting raw
-rows would make patience fire lambda times too early.
+Rounds, not candidates, are the unit of progress. With more than one candidate
+per round, a single round contains several candidate rows and keeps at most
+one, so counting raw rows would make patience fire once per candidate instead
+of once per round.
 
 Stop conditions, whichever fires first:
   1. patience   - N consecutive rounds with no keep

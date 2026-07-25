@@ -66,7 +66,7 @@ Establish these from conversation context where possible, by asking where not:
 - **Primary metric**: name, extraction pattern (a greppable line such as `runtime_ms: 842.3`), direction (`min` or `max`).
 - **Counter-metrics**: at least one, each with extraction pattern, direction, and hard threshold.
 - **Trial cost**: wall-clock and money per trial.
-- **Budget**: max rounds, and λ if running parallel candidates.
+- **Budget**: max rounds, and `candidates_per_round` if running candidates in parallel.
 
 ### LLM-judged metrics: warn, then harden
 
@@ -105,7 +105,7 @@ Write `loop_config.json` and get explicit user confirmation before looping. The 
       "comparator": ">="
     }
   ],
-  "lambda": 1,
+  "candidates_per_round": 1,
   "worktree_isolation": false,
   "trial_timeout_seconds": 600,
   "max_rounds": 40,
@@ -138,7 +138,7 @@ round	candidate	commit	primary	counters	status	description
 
 ## Phase 2: baseline
 
-Round 0 is always the unmodified artifact, λ forced to 1. Run the eval command as-is, record the primary and every counter-metric, status `keep`, description `baseline`. Baseline needs no commit of its own — it's the artifact exactly as committed at the end of Phase 1, evaluated as-is — so the branch's commit count is the number of keep rows *after* baseline plus setup commits, not keep rows including baseline.
+Round 0 is always the unmodified artifact, `candidates_per_round` forced to 1. Run the eval command as-is, record the primary and every counter-metric, status `keep`, description `baseline`. Baseline needs no commit of its own — it's the artifact exactly as committed at the end of Phase 1, evaluated as-is — so the branch's commit count is the number of keep rows *after* baseline plus setup commits, not keep rows including baseline.
 
 The baseline also calibrates the counter-metric thresholds. If the user gave a threshold that the baseline already violates, stop and resolve it with them rather than starting a run where every candidate fails the gate.
 
@@ -146,21 +146,21 @@ If the baseline crashes, fix the harness with the user. Never begin mutating on 
 
 ## Phase 3: the loop
 
-Each round produces λ candidates, evaluates them, and keeps at most one.
+Each round produces `candidates_per_round` candidates, evaluates them, and keeps at most one.
 
 ### Generating candidates
 
 Before proposing anything, read **all** of `results.tsv`, including discards, gate failures, and crashes. Deduplicating against everything seen rather than only against keeps is what stops the loop from paying repeatedly to rediscover the same dead ends. A candidate that restates a logged failure is wasted budget.
 
-Prefer the simplest change that could plausibly move the primary metric. When λ > 1, make the candidates in a round genuinely different from each other, since λ variations on one idea buy almost nothing over a single trial.
+Prefer the simplest change that could plausibly move the primary metric. When a round runs more than one candidate, make them genuinely different from each other, since several variations on one idea buy almost nothing over a single trial.
 
 ### Evaluating candidates
 
-**Sequential (λ = 1).** Edit only files in `mutable_paths`, commit, run the eval command exactly as configured with output redirected to `run.log`, extract metrics with the configured patterns. Never let raw eval output flood context.
+**Sequential (one candidate per round).** Edit only files in `mutable_paths`, commit, run the eval command exactly as configured with output redirected to `run.log`, extract metrics with the configured patterns. Never let raw eval output flood context.
 
-**Parallel (λ > 1).** Set `worktree_isolation` true and give every candidate its own `git worktree`, because parallel agents writing the same paths will corrupt each other. Spawn one subagent per candidate with a bounded contract: apply this specific change, run the eval command, return the extracted primary and counter-metric values plus a one-line description. Wait for the whole batch, then treat a crashed or missing result as a `crash` row rather than letting it sink the round.
+**Parallel (several candidates per round).** Set `worktree_isolation` true and give every candidate its own `git worktree`, because parallel agents writing the same paths will corrupt each other. Spawn one subagent per candidate with a bounded contract: apply this specific change, run the eval command, return the extracted primary and counter-metric values plus a one-line description. Wait for the whole batch, then treat a crashed or missing result as a `crash` row rather than letting it sink the round.
 
-λ parallel candidates explore less efficiently per token than λ sequential trials, because siblings cannot learn from each other's results. Parallelism buys wall-clock, and it costs sample efficiency. Default λ to 1 and raise it only when wall-clock is the binding constraint — check that it actually is before raising it. If a single trial already runs in well under a second, the overhead of dispatching and coordinating λ parallel subagents can easily exceed whatever wall-clock a sequential search would have spent, making λ > 1 a net loss on both axes instead of a trade. λ pays off when the eval command itself is the slow part of a round (minutes, not milliseconds), not by default.
+Running N candidates in parallel explores less efficiently per token than running N sequential trials, because siblings cannot learn from each other's results. Parallelism buys wall-clock, and it costs sample efficiency. Leave `candidates_per_round` at 1 and raise it only when wall-clock is the binding constraint — check that it actually is before raising it. If a single trial already runs in well under a second, the overhead of dispatching and coordinating parallel subagents can easily exceed whatever wall-clock a sequential search would have spent, making a raised `candidates_per_round` a net loss on both axes instead of a trade. Parallelism pays off when the eval command itself is the slow part of a round (minutes, not milliseconds), not by default.
 
 ### Keep or discard
 
