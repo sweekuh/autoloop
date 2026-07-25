@@ -107,7 +107,7 @@ except Exception as e:
     check("evals/evals.json parses", False, str(e))
 
 try:
-    tp = read("TEST_PLAN.md")
+    tp = read("tests", "TEST_PLAN.md")
     block = re.search(r"```json\s*(\{.*?\})\s*```", tp, re.S).group(1)
     tj = json.loads(block)
     tids = [e["id"] for e in tj["evals"]]
@@ -122,7 +122,7 @@ except Exception as e:
 
 # 7. The frozen-harness invariant is still stated where contributors will see it.
 check("CONTRIBUTING documents the frozen harness",
-      "frozen" in read("CONTRIBUTING.md").lower())
+      "frozen" in read(".github", "CONTRIBUTING.md").lower())
 check("SKILL.md still shells out to check_stop.py",
       "scripts/check_stop.py" in read("SKILL.md"))
 

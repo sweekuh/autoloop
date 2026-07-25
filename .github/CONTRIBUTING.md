@@ -47,10 +47,10 @@ Script output stays **pure ASCII** so it can't `UnicodeEncodeError` on a non-UTF
 
 ## Testing behavior changes
 
-Two eval listings, and they are not 1:1 — see `CLAUDE.md` for the details:
+Two eval listings, and they are not 1:1 — see [`CLAUDE.md`](../CLAUDE.md) for the details:
 
 - **`evals/evals.json`** — the skill-creator automated suite (assertions per eval).
-- **`TEST_PLAN.md`** — prose cases for running the skill by hand in Claude Code.
+- **`tests/TEST_PLAN.md`** — prose cases for running the skill by hand in Claude Code.
 
 If you change loop behavior, add or update a case in the one that fits, and say in your PR which you ran.
 
@@ -66,4 +66,4 @@ If you change loop behavior, add or update a case in the one that fits, and say 
 
 ## Reporting bugs & sharing runs
 
-Use the [issue templates](.github/ISSUE_TEMPLATE/). A shared `loop_config.json` + the relevant `results.tsv` rows makes almost any report actionable. Runs where a **counter-metric gate correctly bit** are especially valuable — they show the discipline working.
+Use the [issue templates](ISSUE_TEMPLATE/). A shared `loop_config.json` + the relevant `results.tsv` rows makes almost any report actionable. Runs where a **counter-metric gate correctly bit** are especially valuable — they show the discipline working.

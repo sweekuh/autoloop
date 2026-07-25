@@ -7,12 +7,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This repo *is* a single Claude Code skill package named `autoloop` — it's not an application with its own build/test pipeline. `SKILL.md` is the skill definition Claude Code loads; everything else supports it.
 
 ```
-SKILL.md                skill definition (YAML frontmatter + instructions)
-scripts/check_stop.py   frozen stopping-rule arbiter the skill shells out to
-scripts/update_check.py self-update check the skill runs before Phase 0 (fast-forwards a git checkout to its own upstream)
-evals/evals.json        automated eval suite (skill-creator format)
-TEST_PLAN.md            human-run manual test plan (prose + a lightweight JSON index)
+SKILL.md                 skill definition (YAML frontmatter + instructions)
+scripts/check_stop.py    frozen stopping-rule arbiter the skill shells out to
+scripts/update_check.py  self-update check the skill runs before Phase 0 (fast-forwards a git checkout to its own upstream)
+evals/evals.json         automated eval suite (skill-creator format)
+tests/check.py           mechanical checks; what CI runs on Linux/macOS/Windows
+tests/TEST_PLAN.md       human-run manual test plan (prose + a lightweight JSON index)
+tests/fixtures/          sample loop_config.json + results.tsv so check_stop.py is runnable
+.github/CONTRIBUTING.md  contributor guide (in .github/ because GitHub scans root, docs/, or .github/ only)
+.github/workflows/       CI
 ```
+
+Only four files sit at the repo root, each for a reason: `README.md` (what users read), `SKILL.md` (what Claude Code loads), `CLAUDE.md` (what Claude Code auto-loads when working in this repo), and `LICENSE` (GitHub detects the license from the root). Everything else lives under `scripts/`, `tests/`, `evals/`, or `.github/`.
 
 ## Commands
 
@@ -40,7 +46,7 @@ This is the load-bearing invariant of the whole skill (stated explicitly in the 
 ### Two eval listings that look redundant but aren't
 
 - `evals/evals.json` — the skill-creator-format automated suite: 5 evals, 0-indexed `id`s (0-4), each with a full `assertions` array (`mechanical`, `judgment`, or `manual` type). This is what an automated grading run consumes. It needs an LLM grading harness, so CI cannot run it; CI runs the mechanical checks instead (see `.github/workflows/checks.yml`).
-- `TEST_PLAN.md` — 6 prose cases (`Case 1`-`Case 6`, 1-indexed) for a human running the skill manually in Claude Code, plus its own trailing "Machine-readable" JSON block — a different, lighter schema (no assertions) that indexes the 6 prose cases, not the same data as `evals/evals.json`.
+- `tests/TEST_PLAN.md` — 6 prose cases (`Case 1`-`Case 6`, 1-indexed) for a human running the skill manually in Claude Code, plus its own trailing "Machine-readable" JSON block — a different, lighter schema (no assertions) that indexes the 6 prose cases, not the same data as `evals/evals.json`.
 
 The self-update feature is the one place the two listings deliberately mirror each other (`TEST_PLAN.md` Case 6 and `evals.json` id 4 cover the same states). Edit both when that behavior changes.
 

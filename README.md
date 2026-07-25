@@ -68,16 +68,16 @@ SKILL.md                 the skill definition Claude Code loads
 scripts/check_stop.py    frozen stopping-rule arbiter
 scripts/update_check.py  update check that runs before Phase 0
 tests/check.py           mechanical checks, same ones CI runs
+tests/TEST_PLAN.md       cases for running the skill by hand
 tests/fixtures/          sample config and results for check_stop.py
 evals/evals.json         eval suite, skill-creator format
-TEST_PLAN.md             cases for running the skill by hand
 ```
 
 ## Contributing
 
 Issues are welcome, especially runs that went badly. If you have used it on something, the most useful thing to post is your `loop_config.json` plus the rows of `results.tsv` around whatever went wrong. Runs where a counter-metric gate correctly blocked a "winning" candidate are worth sharing too, since they show the gates earning their place.
 
-[CONTRIBUTING.md](CONTRIBUTING.md) covers the dev loop, the pre-PR checks, and the one invariant that cannot break: the harness stays frozen.
+[CONTRIBUTING.md](.github/CONTRIBUTING.md) covers the dev loop, the pre-PR checks, and the one invariant that cannot break: the harness stays frozen.
 
 ## License
 
