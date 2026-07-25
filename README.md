@@ -37,13 +37,23 @@ One candidate per round is the default. Set `lambda` above 1 and each candidate 
 
 ## Install
 
+Either method works. They differ only in how updates reach you.
+
+**With npx**, which also covers Cursor, Windsurf, Codex, and the other agents the `skills` CLI knows about:
+
+```bash
+npx skills add sweekuh/autoloop
+```
+
+That installs into the current project. Add `-g` to install for your user instead, and `npx skills update autoloop` to pull a newer version later.
+
+**As a git checkout**, which is the version that keeps itself current:
+
 ```bash
 git clone https://github.com/sweekuh/autoloop.git ~/.claude/skills/autoloop
 ```
 
-On Windows that path is `%USERPROFILE%\.claude\skills\autoloop`.
-
-Claude Code then picks it up as the `autoloop` skill. Clone it rather than copying the files in, because the skill updates itself through that checkout.
+On Windows that path is `%USERPROFILE%\.claude\skills\autoloop`. Claude Code then picks it up as the `autoloop` skill.
 
 ## Usage
 
@@ -51,7 +61,9 @@ Run `/autoloop`, or just describe what you want optimized. It triggers on phrasi
 
 ## Self-updating
 
-Before each run the skill runs `scripts/update_check.py`. If your checkout is cleanly behind its tracking branch, it fast-forwards and carries on, so an overnight run doesn't start on a version missing a bugfix.
+Before each run the skill runs `scripts/update_check.py`. If you installed it as a git checkout and that checkout is cleanly behind its tracking branch, it fast-forwards and carries on, so an overnight run doesn't start on a version missing a bugfix.
+
+An `npx skills add` install is a copy rather than a checkout, so there is nothing for the check to fast-forward. It reports `not-git`, says so in a line, and continues. Update those installs with `npx skills update autoloop`.
 
 Worth understanding what that means: it pulls, then follows the updated instructions. Whoever can push to the repo you cloned from can change what this skill does on your machine, and there is no signature check. If you would rather approve updates yourself, pin the checkout with `git checkout <sha>`. A pinned or detached checkout reports `no-upstream` and is never moved. Local edits and diverged history are left alone too, and the check never blocks a run on its own: offline, no git, or any error, it says so in a line and continues.
 
