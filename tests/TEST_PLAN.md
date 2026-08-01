@@ -1,6 +1,6 @@
 # Autoloop test plan
 
-Run these in Claude Code, in a scratch git repo, with the skill installed. Each case targets one failure mode. The mechanical assertions are checkable by reading `results.tsv`, `loop_config.json`, and `git log` after the run.
+Run these in Claude Code, in a scratch git repo, with the skill installed. Each case targets one failure mode. The mechanical assertions are checkable by reading `results-<run_tag>.tsv`, `loop_config.json`, and `git log` after the run.
 
 Setup for cases 1 and 4 requires a toy problem with a **real plateau**, otherwise the loop terminates in one round and tests nothing. Build `bench.py` so the obvious fix helps and further gains need 2 or 3 nonobvious steps. Suggested shape: a hand-rolled O(n^2) sort over a fixed seeded input, `bench.py` printing `runtime_ms:` and `tests_passed:` where the test suite includes stability and edge cases that a naive `sorted()` swap would break.
 
@@ -14,10 +14,10 @@ Setup for cases 1 and 4 requires a toy problem with a **real plateau**, otherwis
 **Must hold**
 - `loop_config.json` contains mutable_paths, eval_command, primary with extract and direction, at least one counter_metric with a threshold, patience, max_rounds
 - the primary is wall-clock, so `min_delta` is nonzero, grounded in a repeated baseline eval (a 0 noise floor on a timing metric keeps luck)
-- `results.tsv` header matches the documented 7 columns, round 0 is `keep` / `baseline`
+- `results-<run_tag>.tsv` header matches the documented 7 columns, round 0 is `keep` / `baseline`
 - at least 4 rounds beyond baseline
-- `results.tsv` is untracked in git
-- commits on the `autoloop/*` branch equal the number of keep rows plus setup commits
+- `results-<run_tag>.tsv` is untracked in git
+- commits on the `autoloop/*` branch equal the number of keep rows after baseline plus setup commits (baseline has no commit of its own)
 - run ended because `check_stop.py` returned stop=true, and the verdict is quoted in the report
 - best `runtime_ms` is lower than baseline, and `tests_passed` is at least 42 in every kept row
 - report contains recipe, gate failures, discard themes, budget verdict
@@ -74,7 +74,7 @@ Note the prompt does **not** mention tests. The skill has to introduce the count
 **Must hold**
 - `candidates_per_round: 4` and `worktree_isolation: true` in config
 - each candidate ran in its own git worktree
-- `results.tsv` has ~4 candidate rows per round sharing a round number
+- `results-<run_tag>.tsv` has ~4 candidate rows per round sharing a round number
 - at most one `keep` per round
 - a crashed candidate produced a `crash` row and did not abort the round
 - `check_stop.py` counted rounds, not rows: patience did not fire early
@@ -91,7 +91,7 @@ Note the prompt does **not** mention tests. The skill has to introduce the count
 > Use autoloop on my resume at ./resume/resume.md, just keep iterating until it's as good as it can get.
 
 **Must hold**
-- no `results.tsv`, no `loop_config.json`, no trials executed
+- no `results-*.tsv`, no `loop_config.json`, no trials executed
 - response names the specific missing property (frozen evaluator, scalar metric)
 - proposes concrete routes to a metric, or states plainly that the task does not fit
 - does not invent an unmeasurable metric and loop on it anyway

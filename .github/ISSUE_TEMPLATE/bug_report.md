@@ -17,7 +17,7 @@ labels: bug
 
 ```
 
-**Relevant `results.tsv` rows**
+**Relevant `results-<run_tag>.tsv` rows**
 <!-- The last few rows around the problem (header + the rows that matter). -->
 ```
 round	candidate	commit	primary	counters	status	description
@@ -25,7 +25,7 @@ round	candidate	commit	primary	counters	status	description
 ```
 
 **Stop verdict (if the stopping rule is involved)**
-<!-- Output of: python scripts/check_stop.py --config loop_config.json --results results.tsv -->
+<!-- Output of: python scripts/check_stop.py --config loop_config.json --results results-<run_tag>.tsv -->
 ```json
 
 ```

@@ -5,34 +5,34 @@
       "id": 0,
       "eval_name": "objective-metric-happy-path",
       "prompt": "I have a repo at /tmp/sortproj with slow_sort.py and bench.py. Running `python3 bench.py` prints a line like `runtime_ms: 842.3`. Use autoloop to make the sort faster. Stop when improvements dry up — say patience 4 and no more than 12 trials.",
-      "expected_output": "Full loop run: config written, baseline logged, multiple trials with keep/revert, stop triggered by check_stop.py, final report with recipe and delta",
+      "expected_output": "Full loop run: config written, baseline logged, multiple rounds with keep/revert, stop triggered by check_stop.py, final report with recipe and delta",
       "files": [
         "/tmp/sortproj/slow_sort.py",
         "/tmp/sortproj/bench.py"
       ],
       "assertions": [
         {
-          "text": "loop_config.json exists and contains mutable_paths, eval_command, metric_extract, direction, patience, max_trials",
+          "text": "loop_config.json exists and contains mutable_paths, eval_command, a primary block with name/extract/direction, at least one counter_metric with a threshold, patience, max_rounds",
           "type": "mechanical"
         },
         {
-          "text": "results.tsv exists with header + trial 0 logged as baseline with status keep",
+          "text": "results-<run_tag>.tsv exists with the documented 7-column header, and round 0 is logged as baseline with status keep",
           "type": "mechanical"
         },
         {
-          "text": "results.tsv contains at least 4 trials beyond baseline",
+          "text": "results-<run_tag>.tsv contains at least 4 rounds beyond baseline",
           "type": "mechanical"
         },
         {
-          "text": "results.tsv is untracked by git (never committed)",
+          "text": "results-<run_tag>.tsv is untracked by git (never committed)",
           "type": "mechanical"
         },
         {
-          "text": ".gitignore contains results.tsv and run.log, committed before first trial",
+          "text": "Neither results-<run_tag>.tsv nor run.log is ever committed on the loop branch",
           "type": "mechanical"
         },
         {
-          "text": "Every discard row corresponds to a git revert: number of commits on autoloop branch equals number of keep rows (+setup commits)",
+          "text": "Every discard row corresponds to a git revert: commits on the autoloop branch equal the number of keep rows after baseline plus setup commits (baseline evaluates the Phase 1 state and has no commit of its own)",
           "type": "mechanical"
         },
         {
@@ -48,7 +48,7 @@
           "type": "judgment"
         },
         {
-          "text": "Guard-violation trial (primary improved, counter-metric broken) logged as discard with guard-violation prefix and reverted",
+          "text": "A candidate that improves the primary while violating a counter-metric gate is logged with status gate_fail, never merged, and surfaced in the report",
           "type": "mechanical"
         }
       ]
@@ -81,6 +81,10 @@
         {
           "text": "loop_config.json sets judge_metric to true",
           "type": "mechanical"
+        },
+        {
+          "text": "Config sets judge_panel_size of at least 3, and the judges use distinct lenses with median scoring",
+          "type": "judgment"
         },
         {
           "text": "No loop iterations run before the user acknowledges the risk",
@@ -136,11 +140,11 @@
           "type": "manual"
         },
         {
-          "text": "results.tsv gets K rows per round sharing a round number; at most one keep per round",
+          "text": "results-<run_tag>.tsv gets K rows per round sharing a round number; at most one keep per round",
           "type": "manual"
         },
         {
-          "text": "check_stop.py reports patience_unit=rounds and stops after N failed rounds, not N failed trials",
+          "text": "check_stop.py stats show rounds and rounds_since_keep grouped by the round column, and patience stops after N failed rounds, not N failed candidates",
           "type": "manual"
         },
         {

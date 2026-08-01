@@ -119,6 +119,18 @@ r = subprocess.run([PY, os.path.join(ROOT, "scripts", "update_check.py"), "--dry
                    capture_output=True, text=True)
 check("update_check.py rejects unknown flags", r.returncode != 0)
 
+# 4b. log_run.py computes a ledger row from the fixtures without writing.
+r = subprocess.run(
+    [PY, os.path.join(ROOT, "scripts", "log_run.py"),
+     "--config", os.path.join(FIXTURES, "loop_config.json"),
+     "--results", os.path.join(FIXTURES, "results.tsv"),
+     "--label", "smoke", "--dry-run"],
+    capture_output=True, text=True)
+check("log_run.py --dry-run runs on fixtures", r.returncode == 0, r.stderr.strip())
+fields = r.stdout.strip().split("\t")
+check("log_run.py row has 16 fields", len(fields) == 16, str(fields))
+check("log_run.py computes baseline and best", "100" in fields and "95" in fields, str(fields))
+
 # 5. Script output stays pure ASCII (guards the non-UTF-8-console fix).
 for script in ("scripts/check_stop.py", "scripts/update_check.py", "scripts/log_run.py"):
     src = read(script)

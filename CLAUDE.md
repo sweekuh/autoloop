@@ -10,6 +10,8 @@ This repo *is* a single Claude Code skill package named `autoloop` — it's not 
 SKILL.md                 skill definition (YAML frontmatter + instructions)
 scripts/check_stop.py    frozen stopping-rule arbiter the skill shells out to
 scripts/update_check.py  self-update check the skill runs before Phase 0 (fast-forwards a git checkout to its own upstream)
+scripts/log_run.py       appends an anonymized run summary to runs/RUNS.tsv and re-renders the README stats block (Phase 4)
+runs/RUNS.tsv            anonymized per-run ledger behind the README "Field results" table
 evals/evals.json         automated eval suite (skill-creator format)
 tests/check.py           mechanical checks; what CI runs on Linux/macOS/Windows
 tests/TEST_PLAN.md       human-run manual test plan (prose + a lightweight JSON index)
@@ -28,6 +30,7 @@ There's no build step or package manifest — the executable code is `scripts/ch
 - Run check_stop the way a live loop invokes it (a live run passes its own `--results results-<run_tag>.tsv`; here, point it at the fixtures): `python3 scripts/check_stop.py --config tests/fixtures/loop_config.json --results tests/fixtures/results.tsv` — prints a JSON verdict `{"stop": bool, "reason": str, "stats": {...}}` to stdout.
 - Run the update check the way SKILL.md invokes it (SKILL.md says `python`, matching its pre-existing `check_stop.py` line; use whichever name exists on your machine): `python3 scripts/update_check.py` (add `--check-only` to report without fast-forwarding) — prints a human line then a JSON verdict `{"status": ..., "action": ...}`. It derives its own skill dir from `__file__`, so it is path-independent across installs.
 - Validate the eval suite parses: `python3 -c "import json; json.load(open('evals/evals.json'))"`
+- Dry-run the ledger logger against the fixtures (prints the row, writes nothing): `python3 scripts/log_run.py --config tests/fixtures/loop_config.json --results tests/fixtures/results.tsv --label smoke --dry-run`
 
 ## Architecture
 
