@@ -1,0 +1,4 @@
+round	candidate	commit	primary	counters	status	description
+1	0	-	-	-	crash	idea A crashed
+2	0	-	-	-	crash	idea B crashed
+3	0	-	-	-	crash	idea C crashed

@@ -9,11 +9,14 @@ per round, a single round contains several candidate rows and keeps at most
 one, so counting raw rows would make patience fire once per candidate instead
 of once per round.
 
-Stop conditions, whichever fires first:
-  1. patience   - N consecutive rounds with no keep
-  2. epsilon    - improvement in best-so-far over the last `epsilon_window`
+Stop conditions, checked in this order, whichever fires first:
+  1. max_rounds - hard cap
+  2. patience   - N consecutive rounds with no keep
+  3. epsilon    - improvement in best-so-far over the last `epsilon_window`
                   rounds is below `epsilon` (metric units)
-  3. max_rounds - hard cap
+
+max_rounds and patience are evaluated even when no keep row has ever parsed,
+so a run that only crashes still terminates instead of looping unbounded.
 
 This script is part of the frozen harness. The looping agent must not edit it.
 Backward compatible with a results.tsv that has no `round` column: each row is
@@ -23,6 +26,18 @@ import argparse
 import csv
 import json
 import sys
+
+
+def parse_round(raw):
+    """Round labels are integers, but tolerate integer-valued floats ('1.0').
+
+    Anything else raises so the caller falls back to per-row rounds; silently
+    accepting '1.5' as a round label would misgroup candidates.
+    """
+    v = float(str(raw).strip())
+    if not v.is_integer():
+        raise ValueError(raw)
+    return int(v)
 
 
 def load_rows(path):
@@ -38,7 +53,7 @@ def load_rows(path):
             except (TypeError, ValueError):
                 r["_primary"] = None
             try:
-                r["_round"] = int(r["round"]) if has_round else i
+                r["_round"] = parse_round(r["round"]) if has_round else i
             except (TypeError, ValueError, KeyError):
                 r["_round"] = i
             r["_status"] = (r.get("status") or "").strip().lower()
@@ -122,16 +137,18 @@ def main():
         "rounds_since_keep": barren,
     }
 
-    if best is None:
-        print(json.dumps({"stop": False, "reason": "no successful trial yet; establish a baseline", "stats": stats}))
-        return
-
+    # Hard caps come before the no-keep early return: a run whose keeps never
+    # parse (all crashes, or a malformed primary column) must still terminate.
     if n_rounds >= max_rounds:
         print(json.dumps({"stop": True, "reason": f"max_rounds reached ({n_rounds}/{max_rounds})", "stats": stats}))
         return
 
     if barren >= patience:
         print(json.dumps({"stop": True, "reason": f"patience exhausted: {barren} consecutive rounds with no improvement (patience={patience})", "stats": stats}))
+        return
+
+    if best is None:
+        print(json.dumps({"stop": False, "reason": "no successful trial yet; establish a baseline", "stats": stats}))
         return
 
     if epsilon > 0 and n_rounds > window:

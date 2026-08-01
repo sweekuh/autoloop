@@ -61,6 +61,36 @@ else:
     check("check_stop.py groups rounds, not rows",
           verdict.get("stats", {}).get("rounds") == 4, str(verdict.get("stats")))
 
+# 2b. Hard caps fire even when no keep row ever parsed. Before the ordering
+#     fix, the "no successful trial yet" early return preceded max_rounds and
+#     patience, so an all-crash run looped unbounded.
+r = subprocess.run(
+    [PY, os.path.join(ROOT, "scripts", "check_stop.py"),
+     "--config", os.path.join(FIXTURES, "loop_config.json"),
+     "--results", os.path.join(FIXTURES, "results-allcrash.tsv")],
+    capture_output=True, text=True)
+try:
+    v = json.loads(r.stdout.strip().splitlines()[-1])
+except Exception:
+    v = {}
+check("check_stop.py stops an all-crash run (patience over no-keep return)",
+      v.get("stop") is True and "patience" in v.get("reason", ""), str(v))
+
+# 2c. Integer-valued float round labels ('1.0') group as rounds, not rows.
+#     Falling back to per-row rounds here re-created the candidate-vs-round
+#     patience miscount the round grouping exists to prevent.
+r = subprocess.run(
+    [PY, os.path.join(ROOT, "scripts", "check_stop.py"),
+     "--config", os.path.join(FIXTURES, "loop_config.json"),
+     "--results", os.path.join(FIXTURES, "results-floatrounds.tsv")],
+    capture_output=True, text=True)
+try:
+    v = json.loads(r.stdout.strip().splitlines()[-1])
+except Exception:
+    v = {}
+check("check_stop.py groups float-labeled rounds correctly",
+      v.get("stats", {}).get("rounds") == 2 and v.get("stop") is False, str(v))
+
 # 3. update_check.py runs and emits a known status. In CI the checkout has no
 #    tracking branch (detached HEAD), which must NOT fast-forward anything.
 head_before = subprocess.run(["git", "-C", ROOT, "rev-parse", "HEAD"],

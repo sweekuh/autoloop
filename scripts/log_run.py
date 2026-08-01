@@ -75,7 +75,8 @@ def load_results(path):
             except (TypeError, ValueError):
                 r["_primary"] = None
             try:
-                r["_round"] = int(r["round"]) if has_round else i
+                rv = float(str(r["round"]).strip()) if has_round else float(i)
+                r["_round"] = int(rv) if rv.is_integer() else i
             except (TypeError, ValueError, KeyError):
                 r["_round"] = i
             r["_status"] = (r.get("status") or "").strip().lower()
