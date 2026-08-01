@@ -13,6 +13,7 @@ Setup for cases 1 and 4 requires a toy problem with a **real plateau**, otherwis
 
 **Must hold**
 - `loop_config.json` contains mutable_paths, eval_command, primary with extract and direction, at least one counter_metric with a threshold, patience, max_rounds
+- the primary is wall-clock, so `min_delta` is nonzero, grounded in a repeated baseline eval (a 0 noise floor on a timing metric keeps luck)
 - `results.tsv` header matches the documented 7 columns, round 0 is `keep` / `baseline`
 - at least 4 rounds beyond baseline
 - `results.tsv` is untracked in git

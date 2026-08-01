@@ -168,6 +168,8 @@ check("SKILL.md check_stop invocation uses the per-run filename",
       "--results results-<run_tag>.tsv" in _skill)
 check("SKILL.md Phase 0 reads prior runs",
       "results-*.tsv" in _skill)
+check("SKILL.md documents the min_delta noise floor",
+      "min_delta" in _skill)
 
 print()
 if failures:

@@ -63,7 +63,7 @@ Establish these from conversation context where possible, by asking where not:
 - **Goal** in one sentence: what does better mean?
 - **Mutable paths**: exact files the loop may edit. Everything else is read-only.
 - **Eval command**: one shell command that runs a trial end to end and prints the metrics.
-- **Primary metric**: name, extraction pattern (a greppable line such as `runtime_ms: 842.3`), direction (`min` or `max`).
+- **Primary metric**: name, extraction pattern (a greppable line such as `runtime_ms: 842.3`), direction (`min` or `max`), and — for a noisy metric — its noise floor `min_delta`: a keep must beat best-so-far by at least this much. Default 0, but wall-clock timings should never run with 0.
 - **Counter-metrics**: at least one, each with extraction pattern, direction, and hard threshold.
 - **Trial cost**: wall-clock and money per trial.
 - **Budget**: max rounds, and `candidates_per_round` if running candidates in parallel.
@@ -134,6 +134,7 @@ Write `loop_config.json` and get explicit user confirmation before looping. The 
   "patience": 8,
   "epsilon": 0.001,
   "epsilon_window": 10,
+  "min_delta": 0.0,
   "judge_metric": false,
   "judge_panel_size": 3,
   "judge_prompt_path": null
@@ -164,6 +165,8 @@ Round 0 is always the unmodified artifact, `candidates_per_round` forced to 1. R
 
 The baseline also calibrates the counter-metric thresholds. If the user gave a threshold that the baseline already violates, stop and resolve it with them rather than starting a run where every candidate fails the gate.
 
+For a noisy primary, baseline is also where `min_delta` gets grounded: run the eval a second time and set `min_delta` to at least the spread between the two runs. A `min_delta` of 0 on a wall-clock metric means best-so-far ratchets downward on measurement luck, and the run reports jitter as progress.
+
 If the baseline crashes, fix the harness with the user. Never begin mutating on top of a broken harness.
 
 ## Phase 3: the loop
@@ -188,7 +191,7 @@ Running N candidates in parallel explores less efficiently per token than runnin
 
 1. Any candidate whose primary metric failed to extract is a `crash`. Read the tail of its log. Fix trivial breakage (typo, missing import) and re-run once. If the idea itself is broken, log and move on.
 2. Any candidate violating a counter-metric gate is `gate_fail`, regardless of how good its primary looks. Log which gate and by how much. These rows are valuable: they map the boundary of the search space.
-3. Among survivors, take the best primary. If it beats best-so-far in the configured direction, keep it: merge that worktree's diff onto the branch and commit. Every other candidate in the round is `discard`.
+3. Among survivors, take the best primary. If it beats best-so-far in the configured direction by at least `min_delta`, keep it: merge that worktree's diff onto the branch and commit. Every other candidate in the round is `discard`.
 4. If no survivor beats best-so-far, the round keeps nothing. Reset the branch to the last kept commit.
 5. Append one row per candidate to `results-<run_tag>.tsv`. Do not commit it, so that reverts never touch the log.
 
