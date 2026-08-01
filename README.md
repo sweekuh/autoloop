@@ -4,6 +4,22 @@ A [Claude Code](https://docs.claude.com/en/docs/claude-code) skill that optimize
 
 It generalizes [karpathy/autoresearch](https://github.com/karpathy/autoresearch), which runs that loop over single-GPU nanochat training. autoloop drops the ML-specific parts, so the artifact can be a sort function, a prompt, a config, a query, or anything else with a benchmark, test suite, or validator behind it.
 
+## Field results
+
+Aggregate stats from real runs, appended as they happen. Each row is one completed run; the trial-by-trial logs stay in their source projects.
+
+<!-- autoloop-stats:start -->
+3 run(s) logged - 14 kept, 2 discarded, 1 blocked by a counter-metric gate, 0 crashed. Median improvement in the primary metric: 56.5%.
+
+| date | task | metric | baseline -> best | improvement | rounds | gate hits | stop |
+|---|---|---|---|---|---|---|---|
+| 2026-07-25 | mobile web load time | `load_ms` (min) | 18241 -> 3773 | +79.3% | 5 | 1 | interrupted by user (round 5 of 20) |
+| 2026-07-25 | game level parity vs reference | `parity_passed` (max) | 23 -> 36 | +56.5% | 5 | 0 | primary hit its ceiling (36 of 36) |
+| 2026-07-28 | long-form guide quality | `judge_median` (max) (judged) | 66 -> 94 | +42.4% | 7 | 0 | ended at round 7 of 8 |
+
+Appended by `scripts/log_run.py` at the end of each run (SKILL.md Phase 4). Labels name the task shape, never the project; full trial logs stay in their source projects.
+<!-- autoloop-stats:end -->
+
 ## The part that makes it work
 
 A loop that tweaks and measures will happily report progress forever. Four properties stop that, and the skill checks all four before it starts:
@@ -79,6 +95,8 @@ git -C ~/.claude/skills/autoloop pull --ff-only
 SKILL.md                 the skill definition Claude Code loads
 scripts/check_stop.py    frozen stopping-rule arbiter
 scripts/update_check.py  update check that runs before Phase 0
+scripts/log_run.py       appends an anonymized run summary to runs/RUNS.tsv
+runs/RUNS.tsv            the run ledger behind the Field results table
 tests/check.py           mechanical checks, same ones CI runs
 tests/TEST_PLAN.md       cases for running the skill by hand
 tests/fixtures/          sample config and results for check_stop.py

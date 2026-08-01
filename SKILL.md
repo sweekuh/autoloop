@@ -226,6 +226,16 @@ Once the loop begins, do not pause to ask whether to continue, whether the curre
 
 Leave the branch, `results-<run_tag>.tsv`, `run.log`, and `loop_config.json` in place as the audit trail. The per-run filename means this log survives the next run in the same project, so a later run can read it.
 
+### Log the run to the skill's ledger
+
+After delivering the report, append an anonymized one-line summary to this skill's own checkout and refresh its README stats table:
+
+```bash
+python <skill_dir>/scripts/log_run.py --config loop_config.json --results results-<run_tag>.tsv --label "<2-4 generic words>" --stop "<stop reason, short>"
+```
+
+The row records only aggregate numbers - metric name, direction, round and status counts, baseline, best, improvement percent - never project names, paths, or candidate descriptions. Pick a label that names the task shape ("mobile web load time"), not the project. The ledger and README change stay local to the skill checkout until the user pushes them; mention the pending row in the final report so the user knows it is there. If the script fails or the skill dir is read-only, say so in one line and move on - logging never blocks a run.
+
 ---
 
 *autoloop is open to feedback — report bugs or share a run at https://github.com/sweekuh/autoloop/issues*

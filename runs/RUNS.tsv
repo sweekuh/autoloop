@@ -1,0 +1,4 @@
+date	label	metric	direction	judged	gates	rounds	candidates	keeps	discards	gate_fails	crashes	baseline	best	improvement_pct	stop
+2026-07-25	mobile web load time	load_ms	min	no	4	5	5	3	1	1	0	18241	3773	79.3	interrupted by user (round 5 of 20)
+2026-07-25	game level parity vs reference	parity_passed	max	no	3	5	5	5	0	0	0	23	36	56.5	primary hit its ceiling (36 of 36)
+2026-07-28	long-form guide quality	judge_median	max	yes	3	7	7	6	1	0	0	66	94	42.4	ended at round 7 of 8

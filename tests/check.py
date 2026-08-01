@@ -33,8 +33,8 @@ def read(*parts):
         return f.read()
 
 
-# 1. Both helpers compile.
-for script in ("scripts/check_stop.py", "scripts/update_check.py"):
+# 1. The helpers compile.
+for script in ("scripts/check_stop.py", "scripts/update_check.py", "scripts/log_run.py"):
     r = subprocess.run([PY, "-m", "py_compile", os.path.join(ROOT, script)],
                        capture_output=True, text=True)
     check(f"compiles: {script}", r.returncode == 0, r.stderr.strip())
@@ -90,7 +90,7 @@ r = subprocess.run([PY, os.path.join(ROOT, "scripts", "update_check.py"), "--dry
 check("update_check.py rejects unknown flags", r.returncode != 0)
 
 # 5. Script output stays pure ASCII (guards the non-UTF-8-console fix).
-for script in ("scripts/check_stop.py", "scripts/update_check.py"):
+for script in ("scripts/check_stop.py", "scripts/update_check.py", "scripts/log_run.py"):
     src = read(script)
     bad = [c for c in src if ord(c) > 127]
     check(f"pure ASCII source: {script}", not bad, f"{len(bad)} non-ascii chars")
