@@ -67,6 +67,7 @@ Establish these from conversation context where possible, by asking where not:
 - **Counter-metrics**: at least one, each with extraction pattern, direction, and hard threshold.
 - **Trial cost**: wall-clock and money per trial.
 - **Budget**: max rounds, and `candidates_per_round` if running candidates in parallel.
+- **Target**, if the primary has a known bound: the value at which the run is done. A bounded metric with no target cannot terminate on success, only on exhaustion.
 - **Run tag**: short, and **unique within this project**. It names the branch and the results file, so reusing a previous run's tag overwrites that run's log. Check for existing `results-*.tsv` first and pick a different tag on collision.
 
 ### Read the project's prior runs
@@ -131,6 +132,7 @@ Write `loop_config.json` and get explicit user confirmation before looping. The 
   "worktree_isolation": false,
   "trial_timeout_seconds": 600,
   "max_rounds": 40,
+  "target": null,
   "patience": 8,
   "epsilon": 0.001,
   "epsilon_window": 10,
@@ -141,11 +143,14 @@ Write `loop_config.json` and get explicit user confirmation before looping. The 
 }
 ```
 
-Stopping rule, all three active, whichever fires first. The user may override any value.
+Stopping rule, all active, whichever fires first. The user may override any value.
 
+- **target**: stop when best-so-far reaches this value in the configured direction. Optional, default `null` (never fires). Set it whenever the primary has a known bound - a pass count, a recall, a percentage - because none of the other conditions can express "done": a run that maxes out its metric otherwise burns `patience` rounds proposing candidates that provably cannot improve.
 - **patience**: stop after this many consecutive rounds with no keep. Default 8.
 - **epsilon over epsilon_window**: stop when total improvement in best-so-far across the last `epsilon_window` rounds falls below `epsilon`, in metric units. Defaults: window 10, epsilon 0.5% of the baseline value when the user gives no number.
 - **max_rounds**: hard cap.
+
+`target` is checked before `patience` so a finished run is not filed under the same stop reason as a stalled one.
 
 Then:
 

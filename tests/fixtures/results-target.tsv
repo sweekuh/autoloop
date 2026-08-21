@@ -1,0 +1,6 @@
+round	candidate	commit	primary	counters	status	description
+0	c0	-	0	false_positives=0	keep	baseline
+1	c1	aaa1111	4	false_positives=0	keep	static checks
+2	c2	bbb2222	8	false_positives=0	keep	behavioural probe
+3	c3	ccc3333	12	false_positives=0	keep	independent yardstick
+4	c4	ddd4444	16	false_positives=0	keep	workload integrity

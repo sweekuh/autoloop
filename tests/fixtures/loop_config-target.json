@@ -1,0 +1,33 @@
+{
+  "goal": "fixture: a bounded primary that reaches its target",
+  "run_tag": "fixture-target",
+  "mutable_paths": [
+    "src/sorter.py"
+  ],
+  "eval_command": "python3 bench.py > run.log 2>&1",
+  "primary": {
+    "name": "tests_passed",
+    "extract": "grep '^tests_passed:' run.log",
+    "direction": "max"
+  },
+  "counter_metrics": [
+    {
+      "name": "tests_passed",
+      "extract": "grep '^tests_passed:' run.log",
+      "direction": "max",
+      "threshold": 42,
+      "comparator": ">="
+    }
+  ],
+  "candidates_per_round": 1,
+  "worktree_isolation": false,
+  "trial_timeout_seconds": 600,
+  "max_rounds": 40,
+  "patience": 8,
+  "epsilon": 0.001,
+  "epsilon_window": 10,
+  "judge_metric": false,
+  "judge_panel_size": 3,
+  "judge_prompt_path": null,
+  "target": 16
+}
