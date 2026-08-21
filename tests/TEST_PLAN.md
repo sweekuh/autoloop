@@ -124,6 +124,28 @@ Tests the update check baked into the skill (`scripts/update_check.py`, invoked 
 
 ---
 
+## Case 7: bounded primary reaches its target
+
+A primary with a known ceiling (checks passed out of N, recall, a percentage) can finish rather than merely stall. Without `target`, none of the other stop conditions can say "done": the run keeps proposing until `patience` runs out, and every one of those rounds is provably incapable of a keep.
+
+**Setup**
+> A toy task whose primary is bounded and reachable, e.g. `bench.py` printing `checks_passed: 7` out of a fixed 10, where a handful of obvious edits get you to 10.
+
+**Prompt**
+> Use autoloop on ./checkproj. `python3 bench.py` prints `checks_passed: N` out of 10 and `lint_errors: N`. Maximize checks_passed, stop when it hits 10, lint_errors must stay 0.
+
+**Must hold**
+- `loop_config.json` sets `"target": 10` with `primary.direction` `max`
+- the run ends the round the primary first reaches 10, not `patience` rounds later
+- `check_stop.py`'s verdict reads `target reached`, and its `stats` include `target`
+- the Phase 4 report quotes that verdict as the stop reason
+- a config with no `target` key still behaves exactly as before (patience / epsilon / max_rounds only)
+
+**Judgment**
+- did the skill propose a target during Phase 0 when the metric was obviously bounded, rather than waiting to be told?
+
+---
+
 ## Machine-readable
 
 ```json
@@ -135,7 +157,8 @@ Tests the update check baked into the skill (`scripts/update_check.py`, invoked 
     {"id": 3, "eval_name": "judged-metric-panel", "runtime": "claude-code", "needs_setup": "promptproj with agent_prompt.md"},
     {"id": 4, "eval_name": "parallel-candidate-rounds", "runtime": "claude-code", "needs_setup": "sortproj toy repo with plateau"},
     {"id": 5, "eval_name": "refuse-unqualifiable", "runtime": "any", "needs_setup": "resume.md"},
-    {"id": 6, "eval_name": "self-update-before-phase0", "runtime": "claude-code", "needs_setup": "skill checkout placed in a known behind/dirty/diverged state"}
+    {"id": 6, "eval_name": "self-update-before-phase0", "runtime": "claude-code", "needs_setup": "skill checkout placed in a known behind/dirty/diverged state"},
+    {"id": 7, "eval_name": "bounded-primary-target", "runtime": "claude-code", "needs_setup": "checkproj toy repo with a bounded primary"}
   ]
 }
 ```

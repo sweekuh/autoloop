@@ -15,6 +15,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURES = os.path.join(ROOT, "tests", "fixtures")
@@ -90,6 +91,42 @@ except Exception:
     v = {}
 check("check_stop.py groups float-labeled rounds correctly",
       v.get("stats", {}).get("rounds") == 2 and v.get("stop") is False, str(v))
+
+# 2d. A bounded primary that has reached its declared target stops on `target`,
+#     not on patience. Without it, a maxed-out run burns `patience` rounds
+#     proposing candidates that provably cannot improve the metric.
+r = subprocess.run(
+    [PY, os.path.join(ROOT, "scripts", "check_stop.py"),
+     "--config", os.path.join(FIXTURES, "loop_config-target.json"),
+     "--results", os.path.join(FIXTURES, "results-target.tsv")],
+    capture_output=True, text=True)
+try:
+    v = json.loads(r.stdout.strip().splitlines()[-1])
+except Exception:
+    v = {}
+check("check_stop.py stops on a reached target",
+      v.get("stop") is True and "target reached" in v.get("reason", ""), str(v))
+check("check_stop.py reports the target in stats",
+      v.get("stats", {}).get("target") == 16, str(v.get("stats")))
+
+# 2e. `target` is opt-in. The same log without it must not stop, or adding the
+#     condition would silently change the verdict for every existing config.
+_cfg = json.loads(read("tests", "fixtures", "loop_config-target.json"))
+_cfg.pop("target")
+_tmp = os.path.join(tempfile.mkdtemp(), "loop_config.json")
+with io.open(_tmp, "w", encoding="utf-8") as f:
+    f.write(json.dumps(_cfg))
+r = subprocess.run(
+    [PY, os.path.join(ROOT, "scripts", "check_stop.py"),
+     "--config", _tmp,
+     "--results", os.path.join(FIXTURES, "results-target.tsv")],
+    capture_output=True, text=True)
+try:
+    v = json.loads(r.stdout.strip().splitlines()[-1])
+except Exception:
+    v = {}
+check("check_stop.py target is opt-in (absent -> no stop)",
+      v.get("stop") is False, str(v))
 
 # 3. update_check.py runs and emits a known status. In CI the checkout has no
 #    tracking branch (detached HEAD), which must NOT fast-forward anything.
@@ -182,6 +219,8 @@ check("SKILL.md Phase 0 reads prior runs",
       "results-*.tsv" in _skill)
 check("SKILL.md documents the min_delta noise floor",
       "min_delta" in _skill)
+check("SKILL.md documents the target stop condition",
+      "**target**" in _skill and '"target": null' in _skill)
 
 print()
 if failures:

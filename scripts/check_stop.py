@@ -11,9 +11,17 @@ of once per round.
 
 Stop conditions, checked in this order, whichever fires first:
   1. max_rounds - hard cap
-  2. patience   - N consecutive rounds with no keep
-  3. epsilon    - improvement in best-so-far over the last `epsilon_window`
+  2. target     - best-so-far has reached the declared goal value (optional)
+  3. patience   - N consecutive rounds with no keep
+  4. epsilon    - improvement in best-so-far over the last `epsilon_window`
                   rounds is below `epsilon` (metric units)
+
+`target` is for a primary with a known bound - a pass count, a recall, a
+percentage. Without it, a run that maxes out its metric still has to burn
+`patience` rounds proposing candidates that provably cannot improve, because
+none of the other three conditions can express "done". It is read from the
+frozen config like `patience` and `max_rounds`, so it is exactly as far outside
+the loop's reach as they are.
 
 max_rounds and patience are evaluated even when no keep row has ever parsed,
 so a run that only crashes still terminates instead of looping unbounded.
@@ -110,6 +118,11 @@ def main():
     epsilon = float(cfg.get("epsilon", 0.0))
     window = int(cfg.get("epsilon_window", 10))
     max_rounds = int(cfg.get("max_rounds", cfg.get("max_trials", 40)))
+    raw_target = cfg.get("target")
+    try:
+        target = None if raw_target is None else float(raw_target)
+    except (TypeError, ValueError):
+        target = None
 
     rows = load_rows(args.results)
     if not rows:
@@ -136,12 +149,22 @@ def main():
         "best": best,
         "rounds_since_keep": barren,
     }
+    if target is not None:
+        stats["target"] = target
 
     # Hard caps come before the no-keep early return: a run whose keeps never
     # parse (all crashes, or a malformed primary column) must still terminate.
     if n_rounds >= max_rounds:
         print(json.dumps({"stop": True, "reason": f"max_rounds reached ({n_rounds}/{max_rounds})", "stats": stats}))
         return
+
+    # A declared target beats patience: once the metric is at its goal, further
+    # rounds cannot improve it, and reporting "patience exhausted" would file a
+    # finished run under the same reason as a stalled one.
+    if target is not None and best is not None:
+        if (best <= target) if direction == "min" else (best >= target):
+            print(json.dumps({"stop": True, "reason": f"target reached: best {best:.6g} meets target {target:.6g} (direction={direction})", "stats": stats}))
+            return
 
     if barren >= patience:
         print(json.dumps({"stop": True, "reason": f"patience exhausted: {barren} consecutive rounds with no improvement (patience={patience})", "stats": stats}))
