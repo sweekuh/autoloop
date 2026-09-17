@@ -6,7 +6,7 @@ Thanks for helping. This repo **is** a single Claude Code skill package — not 
 
 autoloop only works because the loop cannot influence its own grader. `scripts/run_trial.py` (runs the eval, extracts the numbers), `scripts/adjudicate.py` (keep / discard / gate_fail / crash), and `scripts/check_stop.py` (stop / continue, and an audit of the log) are **read-only ground truth** — those decisions have to be something the loop being evaluated can't edit or make for itself, or every run will report it's still improving. The agent never writes a status label; it appends what the scripts print.
 
-So: **never make those three scripts (or the frozen-evaluator rules in `SKILL.md`) depend on loop state.** Change the stopping or keep *policy* deliberately and in the open, and only in the direction that can end a run earlier; never make it gameable. This is the change most likely to be rejected if it slips.
+So: **never make those three scripts (or the frozen-evaluator rules in `SKILL.md`) depend on loop state.** Change the stopping or keep *policy* deliberately and in the open, and only in the direction that can end a run earlier (the one accepted exception: a keep the audit rejects no longer satisfies `target`); never make it gameable. This is the change most likely to be rejected if it slips.
 
 ## Dev setup
 

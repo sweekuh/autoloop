@@ -1,6 +1,6 @@
 # Toy problems for the test plan
 
-`tests/TEST_PLAN.md` cases 1, 2, 4 and 7 (and `evals/evals.json` eval 0) run
+`tests/TEST_PLAN.md` cases 1, 2, 4 and 7 (and `evals/evals.json` evals 0, 5 and 6) run
 the skill against two small projects. These are those projects. They exist so
 that the test plan is runnable, and so the repo has ground truth about whether
 a loop stops for the right reason.
@@ -72,7 +72,7 @@ Environment variables, both for `sortproj/bench.py`:
   it during a loop.
 
 The wall-clock primary is noisy: on a shared VM three baseline runs spread
-by about 10%. Calibrate `min_delta` from repeated baseline runs as SKILL.md
+by about 10%. Calibrate `min_delta_pct` (never an absolute `min_delta`, which stops working once the metric has shrunk past it) from repeated baseline runs as SKILL.md
 says; on a noisy machine the last one or two improvements will sit inside
 the noise floor, and the loop stopping on `patience` there is the correct
 outcome, not a failure.

@@ -61,6 +61,7 @@ then treated as its own round.
 import argparse
 import csv
 import json
+import math
 import re
 import sys
 
@@ -186,7 +187,9 @@ def rules_from_config(cfg):
 
 def load_rows(path, warnings=None):
     rows = []
-    with open(path, newline="") as f:
+    # utf-8-sig: a BOM in the header would otherwise hide the `round` column
+    # and turn every candidate row into its own round.
+    with open(path, newline="", encoding="utf-8-sig", errors="replace") as f:
         reader = csv.DictReader(f, delimiter="\t")
         has_round = reader.fieldnames is not None and "round" in reader.fieldnames
         # tolerate the older `metric` column name for the primary
@@ -196,14 +199,20 @@ def load_rows(path, warnings=None):
                 r["_primary"] = float(raw)
             except (TypeError, ValueError):
                 r["_primary"] = None
+            if r["_primary"] is not None and not math.isfinite(r["_primary"]):
+                if warnings is not None:
+                    warnings.append(f"row {i + 1}: primary {raw!r} is not a finite number; treated as unparseable")
+                r["_primary"] = None
+            r["_bad_round"] = False
             try:
                 r["_round"] = parse_round(r["round"]) if has_round else i
             except (TypeError, ValueError, KeyError):
                 r["_round"] = i
+                r["_bad_round"] = has_round
                 if has_round and warnings is not None:
                     warnings.append(
                         f"row {i + 1}: round {r.get('round')!r} is not an integer; "
-                        f"treated as its own round")
+                        f"treated as its own round, and not as a keep")
             r["_status"] = (r.get("status") or "").strip().lower()
             r["_counters"] = parse_counters(r.get("counters"))
             rows.append(r)
@@ -227,19 +236,31 @@ def group_rounds(rows, rules, warnings):
     for rnum in sorted(buckets):
         members = buckets[rnum]
         kept = None
-        for m in members:
-            if m["_status"] != "keep":
-                continue
+        keep_rows = [m for m in members if m["_status"] == "keep"]
+        if len(keep_rows) > 1:
+            # A round keeps at most one candidate. Two keep rows mean the log
+            # was not written by adjudicate.py; neither is trusted.
+            warnings.append(f"round {rnum}: {len(keep_rows)} keep rows; a round keeps at most one, so none counted")
+            keep_rows = []
+        for m in keep_rows:
             label = f"round {rnum} candidate {m.get('candidate') or '?'}"
+            if m["_bad_round"]:
+                warnings.append(f"{label}: keep row with a non-integer round label; treated as no keep")
+                continue
             if m["_primary"] is None:
                 warnings.append(f"{label}: keep row has no parseable primary; treated as no keep")
-                continue
-            if kept is not None:
-                warnings.append(f"{label}: second keep in one round; treated as no keep")
                 continue
             viol = gate_violations(m["_counters"], gates)
             if viol:
                 warnings.append(f"{label}: keep row violates gate ({'; '.join(viol)}); treated as no keep")
+                continue
+            missing = [name for name, _, _ in gates if m["_counters"].get(name) is None]
+            if missing:
+                # Same rule as adjudicate.py: a gate that cannot be evaluated is
+                # not a passed gate, or a candidate could win by breaking the
+                # counter's extraction.
+                warnings.append(f"{label}: keep row has no value for gated counter(s) "
+                                f"{', '.join(missing)}; treated as no keep")
                 continue
             if best is not None and not improves(m["_primary"], best, direction, noise_floor(best, rules)):
                 warnings.append(
@@ -278,39 +299,49 @@ def best_series(rounds, direction):
     return series
 
 
-def main():
-    p = argparse.ArgumentParser()
-    p.add_argument("--config", required=True)
-    p.add_argument("--results", required=True)
-    args = p.parse_args()
+def _setting(cfg, key, default, warnings, kind=float, allow_none=False):
+    """A numeric config value, or `default` (with a warning) when it is unusable.
 
-    with open(args.config) as f:
+    A traceback here would leave the loop without a verdict; a documented
+    default with a warning keeps the run terminating.
+    """
+    raw = cfg.get(key, default)
+    if raw is None and allow_none:
+        return None
+    try:
+        val = kind(raw)
+    except (TypeError, ValueError):
+        warnings.append(f"config: {key}={raw!r} is not a number; using {default!r}")
+        return default
+    if isinstance(val, float) and not math.isfinite(val):
+        warnings.append(f"config: {key}={raw!r} is not finite; using {default!r}")
+        return default
+    return val
+
+
+def run(args):
+    with open(args.config, encoding="utf-8-sig") as f:
         cfg = json.load(f)
 
     warnings = []
     rules = rules_from_config(cfg)
     direction = rules["direction"]
     if direction not in ("min", "max"):
-        print(json.dumps({
-            "stop": True,
-            "reason": "invalid config: primary.direction must be 'min' or 'max'",
-            "stats": {}, "warnings": warnings}))
-        return
-    patience = int(cfg.get("patience", 8))
-    raw_epsilon = cfg.get("epsilon")
-    epsilon = None if raw_epsilon is None else float(raw_epsilon)
-    window = int(cfg.get("epsilon_window", 10))
-    max_rounds = int(cfg.get("max_rounds", cfg.get("max_trials", 40)))
-    raw_target = cfg.get("target")
-    try:
-        target = None if raw_target is None else float(raw_target)
-    except (TypeError, ValueError):
-        target = None
+        return {"stop": True,
+                "reason": "invalid config: primary.direction must be 'min' or 'max'",
+                "stats": {}, "warnings": warnings}
+    patience = _setting(cfg, "patience", 8, warnings, int)
+    epsilon = _setting(cfg, "epsilon", None, warnings, float, allow_none=True)
+    window = _setting(cfg, "epsilon_window", 10, warnings, int)
+    if "max_rounds" not in cfg and "max_trials" in cfg:
+        cfg = dict(cfg, max_rounds=cfg["max_trials"])
+    max_rounds = _setting(cfg, "max_rounds", 40, warnings, int)
+    per_round = max(1, _setting(cfg, "candidates_per_round", 1, warnings, int))
+    target = _setting(cfg, "target", None, warnings, float, allow_none=True)
 
     rows = load_rows(args.results, warnings)
     if not rows:
-        print(json.dumps({"stop": False, "reason": "no trials yet; run baseline", "stats": {}, "warnings": warnings}))
-        return
+        return {"stop": False, "reason": "no trials yet; run baseline", "stats": {}, "warnings": warnings}
 
     rounds = group_rounds(rows, rules, warnings)
     series = best_series(rounds, direction)
@@ -352,29 +383,30 @@ def main():
         stats["epsilon_effective"] = epsilon
 
     def verdict(stop, reason):
-        print(json.dumps({"stop": stop, "reason": reason, "stats": stats, "warnings": warnings}))
+        return {"stop": stop, "reason": reason, "stats": stats, "warnings": warnings}
 
     # Hard caps come before the no-keep early return: a run whose keeps never
     # parse (all crashes, or a malformed primary column) must still terminate.
     if n_rounds >= max_rounds:
-        verdict(True, f"max_rounds reached ({n_rounds}/{max_rounds})")
-        return
+        return verdict(True, f"max_rounds reached ({n_rounds}/{max_rounds})")
+    # The same cap counted in candidate rows, so a log that reuses one round
+    # label (which the round-based conditions cannot see) still terminates.
+    if len(rows) > max_rounds * per_round:
+        return verdict(True, f"max_rounds reached: {len(rows)} candidate rows exceed "
+                             f"max_rounds x candidates_per_round ({max_rounds} x {per_round})")
 
     # A declared target beats patience: once the metric is at its goal, further
     # rounds cannot improve it, and reporting "patience exhausted" would file a
     # finished run under the same reason as a stalled one.
     if target is not None and best is not None:
         if (best <= target) if direction == "min" else (best >= target):
-            verdict(True, f"target reached: best {best:.6g} meets target {target:.6g} (direction={direction})")
-            return
+            return verdict(True, f"target reached: best {best:.6g} meets target {target:.6g} (direction={direction})")
 
     if barren >= patience:
-        verdict(True, f"patience exhausted: {barren} consecutive rounds with no improvement (patience={patience})")
-        return
+        return verdict(True, f"patience exhausted: {barren} consecutive rounds with no improvement (patience={patience})")
 
     if best is None:
-        verdict(False, "no successful trial yet; establish a baseline")
-        return
+        return verdict(False, "no successful trial yet; establish a baseline")
 
     if epsilon > 0 and n_rounds > window:
         prev = series[-(window + 1)]
@@ -382,10 +414,24 @@ def main():
             gain = (prev - best) if direction == "min" else (best - prev)
             stats["window_gain"] = gain
             if gain < epsilon:
-                verdict(True, f"diminishing returns: gain over last {window} rounds is {gain:.6g}, below epsilon {epsilon:.6g}")
-                return
+                return verdict(True, f"diminishing returns: gain over last {window} rounds is {gain:.6g}, below epsilon {epsilon:.6g}")
 
-    verdict(False, "continue")
+    return verdict(False, "continue")
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--config", required=True)
+    p.add_argument("--results", required=True)
+    args = p.parse_args()
+    try:
+        out = run(args)
+    except Exception as e:  # no verdict at all would leave the loop to decide for itself
+        out = {"stop": True,
+               "reason": f"check_stop.py failed: {type(e).__name__}: {e}"[:300],
+               "stats": {}, "warnings": []}
+    print(json.dumps(out, allow_nan=False))
+    return 0
 
 
 if __name__ == "__main__":

@@ -50,6 +50,7 @@ Output is pure ASCII.
 """
 import argparse
 import json
+import math
 import os
 import sys
 
@@ -64,9 +65,23 @@ def ascii_only(s):
 
 
 def clean(text, limit=300):
-    """One line, no tabs, ASCII, bounded: the results file is tab-separated."""
+    """One line, no tabs or control characters, ASCII, bounded: the results file is tab-separated."""
     s = " ".join(str(text if text is not None else "").split())
+    s = "".join(ch for ch in s if ch >= " " and ch != "\x7f")
     return ascii_only(s)[:limit] or "-"
+
+
+def finite_primary(trial):
+    """The trial's primary as the value the results file will hold, or None.
+
+    Rounded through fmt() so the comparison against best-so-far (which comes
+    back from the file at that precision) uses the same number the row will
+    carry. Non-finite values are None: nan and inf must never become a keep.
+    """
+    p = trial.get("primary")
+    if isinstance(p, bool) or not isinstance(p, (int, float)) or not math.isfinite(p):
+        return None
+    return float(fmt(p))
 
 
 def fmt(v):
@@ -102,26 +117,37 @@ def crash_reason(trial):
     return "no result"
 
 
-def main():
-    p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--config", required=True)
-    p.add_argument("--results", required=True)
-    p.add_argument("--round", required=True, type=int)
-    p.add_argument("--candidates", required=True, help="JSON file: list of candidate records")
-    p.add_argument("--append", action="store_true",
-                   help="append the rows to --results (creating it with the header if missing)")
-    args = p.parse_args()
+def empty(rnum, reason, warnings=None):
+    return {"round": rnum, "rows": [], "keep": None, "keep_commit": None,
+            "best_so_far": None, "appended": 0, "reason": reason, "warnings": warnings or []}
 
-    with open(args.config, encoding="utf-8") as f:
+
+def run(args):
+    with open(args.config, encoding="utf-8-sig") as f:
         cfg = json.load(f)
-    with open(args.candidates, encoding="utf-8") as f:
+    with open(args.candidates, encoding="utf-8-sig") as f:
         cands = json.load(f)
     if not isinstance(cands, list) or not cands:
-        print(json.dumps({"round": args.round, "rows": [], "keep": None, "keep_commit": None,
-                          "best_so_far": None, "reason": "no candidates given", "warnings": []}))
-        return 0
+        return empty(args.round, "no candidates given")
 
     warnings = []
+    # Candidate records are the agent's; normalise them so a missing, duplicate
+    # or non-string id cannot mislabel a row, and a non-dict trial is a crash.
+    seen_ids = set()
+    for i, cand in enumerate(cands):
+        if not isinstance(cand, dict):
+            cands[i] = cand = {"description": clean(cand)}
+            warnings.append(f"candidate {i}: not an object; treated as a crash")
+        if not isinstance(cand.get("trial"), dict):
+            cand["trial"] = {"ok": False}
+        cid = cand.get("candidate")
+        cid = clean(cid, 40) if cid is not None and cid != "" else None
+        if cid is None or cid in seen_ids:
+            new_id = f"{i}" if cid is None else f"{cid}-{i}"
+            warnings.append(f"candidate {i}: id {cid!r} is missing or duplicated; renamed {new_id!r}")
+            cid = new_id
+        cand["candidate"] = cid
+        seen_ids.add(cid)
     rules = check_stop.rules_from_config(cfg)
     direction = rules["direction"]
     if direction not in ("min", "max"):
@@ -137,7 +163,14 @@ def main():
     series = check_stop.best_series(rounds, direction)
     best = series[-1] if series else None
     if any(r["_round"] == args.round for r in rows_seen):
-        warnings.append(f"round {args.round} already has rows in {os.path.basename(args.results)}")
+        # Reusing a round number would fold new candidates into an old round,
+        # which patience and max_rounds count once. Re-running a crashed
+        # candidate happens before adjudication, never after.
+        return empty(args.round, f"round {args.round} already has rows in "
+                                 f"{os.path.basename(args.results)}; use the next round number", warnings)
+    if rows_seen and args.round > max(r["_round"] for r in rows_seen) + 1:
+        warnings.append(f"round {args.round} skips ahead of the last logged round "
+                        f"{max(r['_round'] for r in rows_seen)}")
 
     out = {"round": args.round, "rows": [], "keep": None, "keep_commit": None,
            "best_so_far": best, "appended": 0, "reason": "", "warnings": warnings}
@@ -151,7 +184,7 @@ def main():
                 for line in out["rows"]:
                     f.write(line + "\n")
             out["appended"] = len(out["rows"])
-        print(json.dumps(out))
+        print(json.dumps(out, allow_nan=False))
         return 0
 
     # Round 0: the baseline, one candidate, no comparison.
@@ -162,7 +195,7 @@ def main():
             warnings.append("baseline round has more than one candidate; only the first is used")
         if best is not None:
             warnings.append("results file already holds a baseline; re-baselining is unusual")
-        if not trial.get("ok") or trial.get("primary") is None:
+        if not trial.get("ok") or finite_primary(trial) is None:
             out["reason"] = f"baseline crashed ({crash_reason(trial)}); fix the harness with the user before looping"
             return finish()
         viol = check_stop.gate_violations(trial.get("counters") or {}, gates)
@@ -196,7 +229,8 @@ def main():
     for cand in cands:
         trial = cand.get("trial") or {}
         desc = cand.get("description") or "-"
-        if not trial.get("ok") or trial.get("primary") is None:
+        cand["_p"] = finite_primary(trial)
+        if not trial.get("ok") or cand["_p"] is None:
             labelled.append((cand, "crash", f"crash ({crash_reason(trial)}): {desc}"))
             continue
         counters = trial.get("counters") or {}
@@ -215,38 +249,56 @@ def main():
         survivors.append(cand)
         labelled.append((cand, None, desc))
 
-    keep_id = None
-    keep_commit = None
+    keep = None
     top = None
     if survivors:
-        key = (lambda c: c["trial"]["primary"])
+        key = (lambda c: c["_p"])
         top = min(survivors, key=key) if direction == "min" else max(survivors, key=key)
-        if check_stop.improves(top["trial"]["primary"], best, direction, floor):
-            keep_id = top.get("candidate")
-            keep_commit = top.get("commit")
-            out["reason"] = (f"keep candidate {clean(keep_id, 40)}: {top['trial']['primary']:.6g} beats "
+        if check_stop.improves(top["_p"], best, direction, floor):
+            keep = top
+            out["reason"] = (f"keep candidate {top['candidate']}: {top['_p']:.6g} beats "
                              f"best-so-far {best:.6g} by at least the noise floor {floor:.6g}")
         else:
-            out["reason"] = (f"no keep: best survivor {top['trial']['primary']:.6g} does not beat "
+            out["reason"] = (f"no keep: best survivor {top['_p']:.6g} does not beat "
                              f"best-so-far {best:.6g} by the noise floor {floor:.6g}")
     else:
         out["reason"] = "no keep: every candidate crashed or failed a gate"
 
     for cand, status, desc in labelled:
         if status is None:
-            if keep_id is not None and cand.get("candidate") == keep_id:
+            if cand is keep:
                 status = "keep"
             else:
                 status = "discard"
-                if keep_id is not None and check_stop.improves(cand["trial"]["primary"], best, direction, floor):
+                if keep is not None and check_stop.improves(cand["_p"], best, direction, floor):
                     # An improvement that lost to a sibling is a live idea, not a dead end.
-                    gap = abs(cand["trial"]["primary"] - top["trial"]["primary"])
+                    gap = abs(cand["_p"] - top["_p"])
                     inside = " inside the noise floor" if gap < floor else ""
-                    desc = f"lost to {clean(keep_id, 40)}{inside}: {desc}"
+                    desc = f"lost to {keep['candidate']}{inside}: {desc}"
         out["rows"].append(row(args.round, cand, status, desc))
-    out["keep"] = clean(keep_id, 40) if keep_id is not None else None
-    out["keep_commit"] = clean(keep_commit, 64) if keep_commit is not None else None
+    out["keep"] = keep["candidate"] if keep is not None else None
+    out["keep_commit"] = clean(keep.get("commit"), 64) if keep is not None else None
     return finish()
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    p.add_argument("--config", required=True)
+    p.add_argument("--results", required=True)
+    p.add_argument("--round", required=True, type=int)
+    p.add_argument("--candidates", required=True, help="JSON file: list of candidate records")
+    p.add_argument("--append", action="store_true",
+                   help="append the rows to --results (creating it with the header if missing)")
+    args = p.parse_args()
+    try:
+        res = run(args)
+        if isinstance(res, dict):
+            print(json.dumps(res, allow_nan=False))
+        return 0
+    except Exception as e:  # a traceback is not a JSON line the agent can act on
+        print(json.dumps(empty(args.round, f"adjudicate.py failed: {type(e).__name__}: {e}"[:300]),
+                         allow_nan=False))
+        return 0
 
 
 if __name__ == "__main__":

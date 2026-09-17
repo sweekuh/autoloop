@@ -1,0 +1,6 @@
+round	candidate	commit	primary	counters	status	description
+0	0	aaaaaaa	100.0	tests_passed=42	keep	baseline
+1	0	bbbbbbb	90.0	tests_passed=42	keep	first of two keeps in one round
+1	1	ccccccc	95.0	tests_passed=42	keep	second keep in the same round
+2	0	ddddddd	-	-	keep	keep with no primary
+3	0	eeeeeee	80.0	mem_mb=12	keep	keep without the gated counter

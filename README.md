@@ -43,7 +43,7 @@ Every run also declares a counter-metric: something the loop is forbidden to mak
 - **Phase 3, loop.** Each round proposes candidates, evaluates them with the frozen harness, keeps at most one, and logs all of them including the failures.
 - **Phase 4, report.** Baseline against best, the ordered list of kept commits so the win can be reproduced without rerunning the search, which gates blocked which candidates, and whether more search is worth paying for.
 
-Three scripts make the decisions the loop is not allowed to make for itself. `scripts/run_trial.py` runs each trial under a timeout and extracts the numbers. `scripts/adjudicate.py` turns them into keep, discard, gate_fail, or crash, applying the counter-metric gates and the noise floor. `scripts/check_stop.py` decides when to stop: four conditions, checked in this order, first to fire wins: max_rounds (hard cap), target (best-so-far reaches a declared goal value, for a metric with a known bound), patience (N rounds with no keep), and epsilon (gain across a trailing window drops below a threshold, defaulting to 0.5% of baseline). It also audits the log and refuses to count a keep that violates a gate or sits below the noise floor. They live in separate scripts for the same reason the evaluator is frozen. Having just generated the ideas, the loop always feels one change away from a breakthrough.
+Three scripts make the decisions the loop is not allowed to make for itself. `scripts/run_trial.py` runs each trial under a timeout and extracts the numbers. `scripts/adjudicate.py` turns them into keep, discard, gate_fail, or crash, applying the counter-metric gates and the noise floor. `scripts/check_stop.py` decides when to stop: four conditions, checked in this order, first to fire wins: max_rounds (hard cap), target (best-so-far reaches a declared goal value, for a metric with a known bound), patience (N rounds with no keep), and epsilon (gain across a trailing window drops below a threshold; by default the larger of 0.5% of baseline and twice the noise floor). It also audits the log and refuses to count a keep that violates a gate or sits below the noise floor. They live in separate scripts for the same reason the evaluator is frozen. Having just generated the ideas, the loop always feels one change away from a breakthrough.
 
 One candidate per round is the default. Raise `candidates_per_round` above 1 and each candidate gets its own git worktree, which buys wall-clock time and costs sample efficiency, since candidates in the same round can't learn from each other's results.
 
@@ -87,6 +87,8 @@ Worth understanding what that means: it pulls, then follows the updated instruct
 
 Logging a run at the end of Phase 4 writes to a gitignored file inside the checkout, so a finished run never leaves it dirty or blocks the next update.
 
+The skill's frontmatter pre-approves running its own `check_stop.py`, `adjudicate.py`, `log_run.py`, and `update_check.py`, so an update changes code that then runs without a permission prompt. `run_trial.py`, which executes your eval command, is deliberately not pre-approved. If that trade-off is not for you, pin the checkout.
+
 Update by hand any time:
 
 ```bash
@@ -108,6 +110,7 @@ tests/TEST_PLAN.md       cases for running the skill by hand
 tests/fixtures/          sample configs, results, and a tiny trial project
 tests/toy/               toy projects with a real plateau for the test plan
 evals/evals.json         eval suite, skill-creator format
+evals/results/           recorded runs: trial logs, verdicts, and what the agent found awkward
 ```
 
 ## Contributing

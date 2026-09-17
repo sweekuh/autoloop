@@ -36,7 +36,7 @@
           "type": "mechanical"
         },
         {
-          "text": "Every discard row corresponds to a git revert: commits on the autoloop branch equal the number of keep rows after baseline plus setup commits (baseline evaluates the Phase 1 state and has no commit of its own)",
+          "text": "Every discard left the branch at the last kept commit (a reset, not a revert commit): commits on the autoloop branch equal the number of keep rows after baseline plus setup commits (baseline evaluates the Phase 1 state and has no commit of its own), and every sha in the results file is still reachable under refs/autoloop/<run_tag>/ or on the branch",
           "type": "mechanical"
         },
         {
@@ -106,7 +106,7 @@
       ],
       "assertions": [
         {
-          "text": "No results.tsv, no loop_config.json committed, no trials executed",
+          "text": "No results-*.tsv, no loop_config.json committed, no trials executed",
           "type": "mechanical"
         },
         {
@@ -140,7 +140,7 @@
           "type": "manual"
         },
         {
-          "text": "Subagents return only extracted metric lines + one-line summary; no raw logs in parent context",
+          "text": "Subagents return only the run_trial.py JSON line unchanged plus the commit sha and a one-line summary; no raw logs in parent context",
           "type": "manual"
         },
         {

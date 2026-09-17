@@ -25,7 +25,7 @@ round	candidate	commit	primary	counters	status	description
 ```
 
 **Stop verdict (if the stopping rule is involved)**
-<!-- Output of: python scripts/check_stop.py --config loop_config.json --results results-<run_tag>.tsv -->
+<!-- Output of: python3 ${CLAUDE_SKILL_DIR}/scripts/check_stop.py --config loop_config.json --results results-<run_tag>.tsv  (run from the project; ${CLAUDE_SKILL_DIR} is the skill checkout) -->
 ```json
 
 ```

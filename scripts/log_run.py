@@ -138,7 +138,7 @@ def append_ledger(row, path):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     is_new = not os.path.exists(path)
     with open(path, "a", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=COLUMNS, delimiter="\t")
+        w = csv.DictWriter(f, fieldnames=COLUMNS, delimiter="\t", lineterminator="\n")
         if is_new:
             w.writeheader()
         w.writerow(row)

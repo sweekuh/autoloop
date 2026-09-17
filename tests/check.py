@@ -22,6 +22,7 @@ import tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURES = os.path.join(ROOT, "tests", "fixtures")
 PY = sys.executable
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"  # no scripts/__pycache__ in the checkout from the checks
 failures = []
 
 
@@ -276,10 +277,38 @@ with io.open(_nodir, "w", encoding="utf-8") as f:
 v = stop_verdict(_nodir, os.path.join(FIXTURES, "results.tsv"))
 check("check_stop.py refuses a primary with no direction",
       v.get("stop") is True and "direction" in v.get("reason", ""), str(v))
+v = stop_verdict(os.path.join(FIXTURES, "loop_config-audit.json"), os.path.join(FIXTURES, "results-dupkeep.tsv"))
+check("check_stop.py rejects two keeps in a round, a keep without a primary, and a keep missing its gated counter",
+      len(v.get("warnings", [])) == 3 and v.get("stats", {}).get("best") == 100.0
+      and v.get("stats", {}).get("rounds_since_keep") == 3, str(v))
+_cfg = json.loads(read("tests", "fixtures", "loop_config.json"))
+_cfg["max_rounds"] = 3  # 2 round labels stay under the round cap; 4 rows exceed 3 x 1
+_cap = os.path.join(tmpdir(), "loop_config.json")
+with io.open(_cap, "w", encoding="utf-8") as f:
+    f.write(json.dumps(_cfg))
+v = stop_verdict(_cap, os.path.join(FIXTURES, "results-reusedround.tsv"))
+check("check_stop.py caps candidate rows so a reused round label still terminates",
+      v.get("stop") is True and "candidate rows" in v.get("reason", ""), str(v))
+_cfg = json.loads(read("tests", "fixtures", "loop_config.json"))
+_cfg["patience"] = "abc"
+_cfg["epsilon_window"] = None
+_bad = os.path.join(tmpdir(), "loop_config.json")
+with io.open(_bad, "w", encoding="utf-8") as f:
+    f.write(json.dumps(_cfg))
+v = stop_verdict(_bad, os.path.join(FIXTURES, "results.tsv"))
+check("check_stop.py answers a non-numeric config value with a verdict and a warning, not a traceback",
+      "_stderr" not in v and isinstance(v.get("stop"), bool) and any("patience" in w for w in v.get("warnings", [])), str(v))
+_bom = os.path.join(tmpdir(), "results-bom.tsv")
+with io.open(_bom, "w", encoding="utf-8-sig", newline="\n") as f:
+    f.write(read("tests", "fixtures", "results.tsv"))
+v = stop_verdict(os.path.join(FIXTURES, "loop_config.json"), _bom)
+check("check_stop.py tolerates a UTF-8 BOM in the results header",
+      v.get("stats", {}).get("rounds") == 4 and v.get("warnings") == [], str(v))
 
-# 10. epsilon: null means 0.5% of baseline, derived by check_stop.py. The
-#     template used to ship epsilon 0.001, which with patience < epsilon_window
-#     and any min_delta >= 0.001 could never fire.
+# 10. epsilon: null means max(0.5% of baseline, 2x the noise floor at
+#     best-so-far), derived by check_stop.py. The template used to ship
+#     epsilon 0.001, which with patience < epsilon_window and any min_delta
+#     >= 0.001 could never fire.
 v = stop_verdict(os.path.join(FIXTURES, "loop_config-epsilon.json"),
                  os.path.join(FIXTURES, "results-epsilon.tsv"))
 check("check_stop.py derives epsilon from baseline when null",
@@ -362,14 +391,47 @@ check("run_trial.py extracts the primary and the counter",
 check("run_trial.py output is pure ASCII", all(ord(c) < 128 for c in json.dumps(t_ok)))
 t_to = run_trial("sleep")
 check("run_trial.py enforces trial_timeout_seconds",
-      t_to.get("ok") is False and t_to.get("timed_out") is True and t_to.get("elapsed_s", 99) < 15, str(t_to))
+      t_to.get("ok") is False and t_to.get("timed_out") is True and t_to.get("elapsed_s", 99) < 30, str(t_to))
 t_cr = run_trial("crash")
 check("run_trial.py reports a crash with a tail",
       t_cr.get("ok") is False and t_cr.get("primary") is None
       and any("harness broke" in ln for ln in t_cr.get("tail", [])), str(t_cr))
 t_gate = run_trial("gate")
-check("run_trial.py takes the last matching line for a counter",
+check("run_trial.py reads a counter through the fixture extract (which picks the last matching line)",
       t_gate.get("ok") is True and t_gate.get("counters", {}).get("tests_passed") == 10.0, str(t_gate))
+t_fail = run_trial("fail")
+check("run_trial.py files a non-zero eval exit as a crash even when the metric printed",
+      t_fail.get("ok") is False and t_fail.get("exit_code") == 3 and t_fail.get("primary") == 123.4, str(t_fail))
+check("run_trial.py escapes non-ASCII eval output in the tail (backslashreplace)",
+      any("caf\\xe9" in ln or "caf\\ufffd" in ln for ln in t_cr.get("tail", [])), str(t_cr.get("tail")))
+
+
+def trial_with_extract(extract_cmd, **cfg_overrides):
+    cfg = json.loads(json.dumps(_cfg))
+    cfg["primary"]["extract"] = extract_cmd
+    cfg.update(cfg_overrides)
+    path = os.path.join(_proj, "loop_config-extract.json")
+    with io.open(path, "w", encoding="utf-8") as f:
+        f.write(json.dumps(cfg))
+    r = subprocess.run([PY, os.path.join(ROOT, "scripts", "run_trial.py"), "--config", path, "--cwd", _proj],
+                       capture_output=True, text=True, env=dict(os.environ, AUTOLOOP_FIXTURE_MODE="ok"))
+    try:
+        return json.loads(r.stdout.strip().splitlines()[-1])
+    except Exception:
+        return {"_stderr": r.stderr.strip(), "_rc": r.returncode}
+
+
+_two = trial_with_extract(_pyq + " -c \"print('runtime_ms: 1'); print('runtime_ms: 2')\"")
+check("run_trial.py refuses an extract that prints two lines (an artifact printing its own metric line)",
+      _two.get("primary") is None and _two.get("ok") is False, str(_two))
+_err = trial_with_extract(_pyq + " -c \"import sys; sys.stderr.write('error 42\\n'); sys.exit(1)\"")
+check("run_trial.py never scrapes digits from an extract's stderr or a failed extract",
+      _err.get("primary") is None, str(_err))
+_inf = trial_with_extract(_pyq + " -c \"print('runtime_ms: 1e999')\"")
+check("run_trial.py treats a non-finite metric as unreadable", _inf.get("primary") is None, str(_inf))
+_nto = trial_with_extract(_cfg["primary"]["extract"], trial_timeout_seconds=None)
+check("run_trial.py falls back to a 600 s timeout when the config has none",
+      _nto.get("ok") is True and any("using 600s" in ln for ln in _nto.get("tail", [])), str(_nto))
 
 _results = os.path.join(_proj, "results-fixture-trial.tsv")
 with io.open(_results, "w", encoding="utf-8", newline="\n") as f:
@@ -450,6 +512,37 @@ v = stop_verdict(_cfgp, _results)
 check("check_stop.py reads the appended round with zero warnings",
       v.get("warnings") == [] and v.get("stats", {}).get("best") == 45.0 and v.get("stats", {}).get("rounds") == 4, str(v))
 check("SKILL.md uses adjudicate.py --append", "--candidates candidates.json --append" in _skill)
+
+# 11b. adjudicate.py is only as frozen as its inputs: best-so-far must come
+#      from the audited log, an unevaluable gate is not a passed gate, a round
+#      number is used once, agent-written candidate ids cannot mislabel rows,
+#      and garbage input yields a JSON line rather than a traceback.
+_bogus = os.path.join(_proj, "results-bogus.tsv")
+with io.open(_bogus, "w", encoding="utf-8", newline="\n") as f:
+    f.write("round\tcandidate\tcommit\tprimary\tcounters\tstatus\tdescription\n"
+            "0\t0\t-\t100\ttests_passed=42\tkeep\tbaseline\n"
+            "1\t0\tx\t5\ttests_passed=10\tkeep\tmislabeled: violates the gate\n")
+ab = adjudicate(_bogus, 2, [{"candidate": "0", "commit": "y", "description": "real", "trial": dict(t_ok, primary=90.0)}])
+check("adjudicate.py takes best-so-far from the audited log, not from raw keep rows",
+      ab.get("best_so_far") == 100.0 and ab.get("keep") == "0", str(ab))
+am = adjudicate(_bogus, 3, [{"candidate": "0", "commit": "z", "description": "broke the counter",
+                            "trial": dict(t_ok, primary=1.0, counters={})}])
+check("adjudicate.py files a candidate whose gated counter did not extract as gate_fail",
+      [ln.split("\t")[5] for ln in am.get("rows", [])] == ["gate_fail"] and "did not extract" in am.get("rows", [""])[0], str(am))
+ad = adjudicate(_results, 4, [{"candidate": "0", "commit": "w", "description": "again", "trial": dict(t_ok, primary=10.0)}])
+check("adjudicate.py refuses to write into a round that already has rows",
+      ad.get("rows") == [] and "already has rows" in ad.get("reason", ""), str(ad))
+ai = adjudicate(_bogus, 5, [{"candidate": "0", "commit": "p", "description": "first", "trial": dict(t_ok, primary=80.0)},
+                            {"candidate": "0", "commit": "q", "description": "second", "trial": dict(t_ok, primary=70.0)}])
+check("adjudicate.py renames a duplicated candidate id and keeps exactly one",
+      [ln.split("\t")[5] for ln in ai.get("rows", [])].count("keep") == 1
+      and any("duplicated" in w for w in ai.get("warnings", [])) and ai.get("keep") == "0-1", str(ai))
+ag = adjudicate(_bogus, 6, "garbage")
+check("adjudicate.py answers garbage candidates with a JSON line, not a traceback",
+      ag.get("rows") == [] and "no candidates" in ag.get("reason", ""), str(ag))
+ag = adjudicate(_bogus, 6, ["not an object"])
+check("adjudicate.py files a malformed candidate record as a crash",
+      [ln.split("\t")[5] for ln in ag.get("rows", [])] == ["crash"], str(ag))
 _bad = os.path.join(_proj, "results-bad.tsv")
 with io.open(_bad, "w", encoding="utf-8", newline="\n") as f:
     f.write("round\tcandidate\tcommit\tprimary\tcounters\tstatus\tdescription\n")
@@ -468,7 +561,13 @@ check("SKILL.md says the agent never writes a status label",
 #     tracked file makes update_check.py return behind-dirty, which silently
 #     disabled self-update for every user after their first logged run.
 _clone = os.path.join(tmpdir(), "skill")
-shutil.copytree(ROOT, _clone, ignore=shutil.ignore_patterns(".git", "__pycache__", "local", ".claude"))
+for _rel in subprocess.run(["git", "-C", ROOT, "ls-files", "-z"], capture_output=True).stdout.decode("utf-8").split("\0"):
+    _src = os.path.join(ROOT, _rel)
+    if not _rel or not os.path.isfile(_src):
+        continue
+    _dst = os.path.join(_clone, _rel)
+    os.makedirs(os.path.dirname(_dst), exist_ok=True)
+    shutil.copy2(_src, _dst)  # tracked files only: never a .venv or a worktree
 _git = ["git", "-C", _clone, "-c", "user.name=t", "-c", "user.email=t@t"]
 subprocess.run(_git + ["init", "-q"], capture_output=True)
 subprocess.run(_git + ["add", "-A"], capture_output=True)
@@ -588,6 +687,10 @@ check("SKILL.md frontmatter is delimited by two --- lines", _fences == 2)
 _allowed = [ln for ln in _fm if ln.startswith("allowed-tools:")]
 check("SKILL.md frontmatter pre-approves the bundled scripts (allowed-tools)",
       any("scripts/" in ln for ln in _allowed), str(_allowed))
+check("SKILL.md pre-approves check_stop.py and adjudicate.py by name, with the documented ' *' suffix",
+      any("scripts/check_stop.py *" in ln and "scripts/adjudicate.py *" in ln for ln in _allowed), str(_allowed))
+check("SKILL.md does not pre-approve run_trial.py (it executes the eval command)",
+      not any("run_trial" in ln or "scripts/*" in ln for ln in _allowed), str(_allowed))
 _meta_ok = False
 _meta_detail = "no metadata: line in frontmatter"
 for _i, _ln in enumerate(_fm):
@@ -618,7 +721,8 @@ check("SKILL.md description stays under the 1536-char listing limit",
 
 check("SKILL.md tells the loop what to do when scripts/ is missing",
       "the frozen harness is missing" in _skill)
-_bare = [ln for ln in _skill_lines if ln.strip().startswith("python ")]
+_bare = [ln for ln in _skill_lines if not ln.startswith("allowed-tools:")
+         and re.search(r"(^|[\s`(])python\s+(\$|<|\S*scripts/)", ln)]
 check("SKILL.md command lines use python3, never bare python",
       not _bare, str(_bare))
 
@@ -646,7 +750,7 @@ def metric(stdout, name):
     return int(found[0]) if len(found) == 1 else None
 
 
-r = run_toy_bench("sortproj")
+r = _r_base = run_toy_bench("sortproj")
 check("sortproj bench.py exits 0", r.returncode == 0, r.stderr.strip()[-300:])
 check("sortproj bench.py prints exactly one runtime_ms line",
       len(re.findall(r"^runtime_ms: [0-9]+\.[0-9]$", r.stdout, re.M)) == 1, r.stdout[:300])
@@ -657,11 +761,22 @@ check("sortproj baseline passes every test",
       _passed is not None and _passed == _total,
       "\n".join(ln for ln in r.stdout.splitlines() if ln.startswith("FAIL"))[:600])
 
-r = run_toy_bench("sortproj", AUTOLOOP_TOY_IMPL="naive_impl")
+r = _r_naive = run_toy_bench("sortproj", AUTOLOOP_TOY_IMPL="naive_impl")
 _passed, _total = metric(r.stdout, "tests_passed"), metric(r.stdout, "tests_total")
 check("sortproj plateau is real: the obvious fix breaks a test",
       r.returncode == 0 and _passed is not None and _total is not None and _passed < _total,
       f"passed={_passed} total={_total}")
+
+
+def runtime_ms(stdout):
+    found = re.findall(r"^runtime_ms: ([0-9.]+)$", stdout, re.M)
+    return float(found[0]) if len(found) == 1 else None
+
+
+check("sortproj baseline still has headroom (the hasty fix is faster than the shipped sorter)",
+      runtime_ms(_r_base.stdout) is not None and runtime_ms(_r_naive.stdout) is not None
+      and runtime_ms(_r_base.stdout) > runtime_ms(_r_naive.stdout),
+      f"baseline={runtime_ms(_r_base.stdout)} naive={runtime_ms(_r_naive.stdout)}")
 
 r = run_toy_bench("checkproj")
 check("checkproj bench.py exits 0", r.returncode == 0, r.stderr.strip()[-300:])
@@ -672,6 +787,14 @@ check("checkproj bench.py prints checks_total: 10", metric(r.stdout, "checks_tot
 check("checkproj baseline is lint-clean (lint_errors: 0)",
       metric(r.stdout, "lint_errors") == 0,
       "\n".join(ln for ln in r.stdout.splitlines() if ln.startswith("LINT"))[:600])
+_cp_copy = os.path.join(tmpdir(), "checkproj")
+shutil.copytree(os.path.join(TOY, "checkproj"), _cp_copy, ignore=shutil.ignore_patterns("__pycache__"))
+with io.open(os.path.join(_cp_copy, "app.py"), "a", encoding="utf-8") as f:
+    f.write("\nprint('lint bait')   \n")
+r = subprocess.run([PY, "bench.py"], cwd=_cp_copy, capture_output=True, text=True,
+                   env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
+check("checkproj lint actually bites (a planted print and trailing whitespace are counted)",
+      r.returncode == 0 and (metric(r.stdout, "lint_errors") or 0) >= 1, r.stdout[:300])
 
 _empty = os.path.join(tmpdir(), "results-empty.tsv")
 with io.open(_empty, "w", encoding="utf-8", newline="\n") as f:

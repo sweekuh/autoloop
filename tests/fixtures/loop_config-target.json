@@ -12,11 +12,11 @@
   },
   "counter_metrics": [
     {
-      "name": "tests_passed",
-      "extract": "grep '^tests_passed:' run.log",
-      "direction": "max",
-      "threshold": 42,
-      "comparator": ">="
+      "name": "false_positives",
+      "extract": "grep '^false_positives:' run.log",
+      "direction": "min",
+      "threshold": 0,
+      "comparator": "<="
     }
   ],
   "candidates_per_round": 1,
