@@ -5,8 +5,16 @@ Runs at the end of Phase 4 (see SKILL.md). Reads the run's loop_config.json and
 results-<run_tag>.tsv from the TARGET project, extracts only aggregate numbers,
 and writes to THIS skill checkout:
 
-  runs/RUNS.tsv   one row per run (created on first use)
-  README.md       the block between the autoloop-stats markers is re-rendered
+  runs/local/RUNS.tsv   one row per run, gitignored (the default)
+  runs/RUNS.tsv         the published ledger, only with --publish
+  README.md             the block between the autoloop-stats markers is
+                        re-rendered, only with --publish
+
+The default is the gitignored local file on purpose. The published ledger and
+the README are tracked files, and a modified tracked file makes the checkout
+dirty, which makes update_check.py refuse to fast-forward (`behind-dirty`).
+Before this split, the first logged run silently disabled self-update for
+every user who could not push. Maintainers pass --publish and commit.
 
 Anonymized by design: the row carries the metric name, direction, round and
 status counts, baseline, best, and improvement percent - never project names,
@@ -14,8 +22,8 @@ file paths, or candidate descriptions. The --label is chosen by the caller and
 should name the task shape ("mobile web load time"), not the project.
 
 Idempotent: re-logging an identical run (same label, date, baseline, best) is
-a no-op for the ledger; the README block is re-rendered either way. The ledger
-and README edits stay local until the user pushes the skill repo.
+a no-op for the ledger; with --publish the README block is re-rendered either
+way.
 
 This script writes only inside the skill's own checkout. It is not part of the
 frozen harness for the run being logged: it runs after the loop has stopped and
@@ -29,7 +37,8 @@ import os
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-LEDGER = os.path.join(ROOT, "runs", "RUNS.tsv")
+LEDGER_LOCAL = os.path.join(ROOT, "runs", "local", "RUNS.tsv")
+LEDGER_PUBLIC = os.path.join(ROOT, "runs", "RUNS.tsv")
 README = os.path.join(ROOT, "README.md")
 START = "<!-- autoloop-stats:start -->"
 END = "<!-- autoloop-stats:end -->"
@@ -113,22 +122,22 @@ def summarize(rows, direction):
     return baseline, best_val, round(pct, 1), counts
 
 
-def read_ledger():
-    if not os.path.exists(LEDGER):
+def read_ledger(path):
+    if not os.path.exists(path):
         return []
-    with open(LEDGER, newline="", encoding="utf-8") as f:
+    with open(path, newline="", encoding="utf-8") as f:
         return list(csv.DictReader(f, delimiter="\t"))
 
 
-def append_ledger(row):
-    existing = read_ledger()
+def append_ledger(row, path):
+    existing = read_ledger(path)
     for r in existing:
         if (r.get("label"), r.get("date"), r.get("baseline"), r.get("best")) == (
                 row["label"], row["date"], row["baseline"], row["best"]):
             return existing, False
-    os.makedirs(os.path.dirname(LEDGER), exist_ok=True)
-    is_new = not os.path.exists(LEDGER)
-    with open(LEDGER, "a", newline="", encoding="utf-8") as f:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    is_new = not os.path.exists(path)
+    with open(path, "a", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=COLUMNS, delimiter="\t")
         if is_new:
             w.writeheader()
@@ -153,9 +162,12 @@ def render_block(ledger):
     crashes = sum(int(r["crashes"]) for r in ledger)
     med = median([float(r["improvement_pct"]) for r in ledger])
     lines = [
-        f"{total} run(s) logged - {keeps} kept, {discards} discarded, "
+        f"{total} completed run(s) logged - {keeps} kept, {discards} discarded, "
         f"{gate_fails} blocked by a counter-metric gate, {crashes} crashed. "
         f"Median improvement in the primary metric: {med:g}%.",
+        "",
+        "Completed runs only: a task refused in Phase 0 or a baseline that crashed never "
+        "produces a row, and a run the user interrupted is logged at its last round.",
         "",
         "| date | task | metric | baseline -> best | improvement | rounds | gate hits | stop |",
         "|---|---|---|---|---|---|---|---|",
@@ -168,7 +180,7 @@ def render_block(ledger):
             f"| {r['rounds']} | {r['gate_fails']} | {r['stop']} |")
     lines += [
         "",
-        "Appended by `scripts/log_run.py` at the end of each run (SKILL.md Phase 4). "
+        "Appended by `scripts/log_run.py --publish` (SKILL.md Phase 4). "
         "Labels name the task shape, never the project; full trial logs stay in their "
         "source projects.",
     ]
@@ -199,6 +211,10 @@ def main():
     p.add_argument("--date", default=None, help="run date YYYY-MM-DD (default: today)")
     p.add_argument("--dry-run", action="store_true",
                    help="print the row; write nothing")
+    p.add_argument("--publish", action="store_true",
+                   help="append to the tracked runs/RUNS.tsv and re-render the README "
+                        "stats block (maintainers; leaves the checkout dirty until "
+                        "committed). Default: the gitignored runs/local/RUNS.tsv only.")
     args = p.parse_args()
 
     metric, direction, gates, judged = load_config(args.config)
@@ -228,11 +244,16 @@ def main():
         print("\t".join(row[c] for c in COLUMNS))
         return 0
 
-    ledger, added = append_ledger(row)
-    update_readme(ledger)
+    path = LEDGER_PUBLIC if args.publish else LEDGER_LOCAL
+    ledger, added = append_ledger(row, path)
+    if args.publish:
+        update_readme(ledger)
     verb = "logged" if added else "already logged (ledger unchanged)"
+    where = os.path.relpath(path, ROOT).replace(os.sep, "/")
     print(f"log_run: {verb} - {row['label']}: {row['baseline']} -> {row['best']} "
-          f"({float(row['improvement_pct']):+g}%), README stats re-rendered")
+          f"({float(row['improvement_pct']):+g}%) -> {where}"
+          + (", README stats re-rendered" if args.publish else
+             " (gitignored; maintainers publish with --publish)"))
     return 0
 
 

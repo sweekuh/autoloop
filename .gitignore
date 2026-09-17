@@ -1,2 +1,5 @@
 __pycache__/
 *.pyc
+# per-user run ledger written by scripts/log_run.py; never tracked, so a logged
+# run cannot dirty the checkout and block update_check.py
+runs/local/

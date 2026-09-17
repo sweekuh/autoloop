@@ -9,7 +9,9 @@ It generalizes [karpathy/autoresearch](https://github.com/karpathy/autoresearch)
 Aggregate stats from real runs, appended as they happen. Each row is one completed run; the trial-by-trial logs stay in their source projects.
 
 <!-- autoloop-stats:start -->
-3 run(s) logged - 14 kept, 2 discarded, 1 blocked by a counter-metric gate, 0 crashed. Median improvement in the primary metric: 56.5%.
+3 completed run(s) logged - 14 kept, 2 discarded, 1 blocked by a counter-metric gate, 0 crashed. Median improvement in the primary metric: 56.5%.
+
+Completed runs only: a task refused in Phase 0 or a baseline that crashed never produces a row, and a run the user interrupted is logged at its last round.
 
 | date | task | metric | baseline -> best | improvement | rounds | gate hits | stop |
 |---|---|---|---|---|---|---|---|
@@ -17,7 +19,7 @@ Aggregate stats from real runs, appended as they happen. Each row is one complet
 | 2026-07-25 | game level parity vs reference | `parity_passed` (max) | 23 -> 36 | +56.5% | 5 | 0 | primary hit its ceiling (36 of 36) |
 | 2026-07-28 | long-form guide quality | `judge_median` (max) (judged) | 66 -> 94 | +42.4% | 7 | 0 | ended at round 7 of 8 |
 
-Appended by `scripts/log_run.py` at the end of each run (SKILL.md Phase 4). Labels name the task shape, never the project; full trial logs stay in their source projects.
+Appended by `scripts/log_run.py --publish` (SKILL.md Phase 4). Labels name the task shape, never the project; full trial logs stay in their source projects.
 <!-- autoloop-stats:end -->
 
 ## The part that makes it work
@@ -82,6 +84,8 @@ Before each run the skill runs `scripts/update_check.py`. If you installed it as
 An `npx skills add` install is a copy rather than a checkout, so there is nothing for the check to fast-forward. It reports `not-git`, says so in a line, and continues. Update those installs with `npx skills update autoloop`.
 
 Worth understanding what that means: it pulls, then follows the updated instructions. Whoever can push to the repo you cloned from can change what this skill does on your machine, and there is no signature check. If you would rather approve updates yourself, pin the checkout with `git checkout <sha>`. A pinned or detached checkout reports `no-upstream` and is never moved. Local edits and diverged history are left alone too, and the check never blocks a run on its own: offline, no git, or any error, it says so in a line and continues.
+
+Logging a run at the end of Phase 4 writes to a gitignored file inside the checkout, so a finished run never leaves it dirty or blocks the next update.
 
 Update by hand any time:
 

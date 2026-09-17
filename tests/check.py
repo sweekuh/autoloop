@@ -390,6 +390,39 @@ check("SKILL.md shells out to run_trial.py and adjudicate.py",
 check("SKILL.md says the agent never writes a status label",
       "never write a status label" in _skill)
 
+# 12. log_run.py must not dirty the skill checkout by default. A modified
+#     tracked file makes update_check.py return behind-dirty, which silently
+#     disabled self-update for every user after their first logged run.
+_clone = os.path.join(tempfile.mkdtemp(), "skill")
+shutil.copytree(ROOT, _clone, ignore=shutil.ignore_patterns(".git", "__pycache__", "local", ".claude"))
+_git = ["git", "-C", _clone, "-c", "user.name=t", "-c", "user.email=t@t"]
+subprocess.run(_git + ["init", "-q"], capture_output=True)
+subprocess.run(_git + ["add", "-A"], capture_output=True)
+subprocess.run(_git + ["commit", "-q", "-m", "snapshot"], capture_output=True)
+r = subprocess.run(
+    [PY, os.path.join(_clone, "scripts", "log_run.py"),
+     "--config", os.path.join(FIXTURES, "loop_config.json"),
+     "--results", os.path.join(FIXTURES, "results.tsv"),
+     "--label", "smoke", "--stop", "patience"],
+    capture_output=True, text=True)
+check("log_run.py runs for real against a snapshot checkout", r.returncode == 0, r.stderr.strip())
+_porcelain = subprocess.run(_git + ["status", "--porcelain"], capture_output=True, text=True).stdout.strip()
+check("log_run.py leaves the checkout clean by default", _porcelain == "", _porcelain)
+_local = os.path.join(_clone, "runs", "local", "RUNS.tsv")
+check("log_run.py wrote the gitignored local ledger",
+      os.path.exists(_local) and len(io.open(_local, encoding="utf-8").read().strip().splitlines()) == 2)
+r = subprocess.run(
+    [PY, os.path.join(_clone, "scripts", "log_run.py"),
+     "--config", os.path.join(FIXTURES, "loop_config.json"),
+     "--results", os.path.join(FIXTURES, "results.tsv"),
+     "--label", "smoke", "--stop", "patience", "--publish"],
+    capture_output=True, text=True)
+_porcelain = subprocess.run(_git + ["status", "--porcelain"], capture_output=True, text=True).stdout.strip()
+check("log_run.py --publish updates the tracked ledger and README",
+      r.returncode == 0 and "README.md" in _porcelain and "runs/RUNS.tsv" in _porcelain, _porcelain or r.stderr)
+check("SKILL.md Phase 4 logs to the local ledger", "runs/local/RUNS.tsv" in _skill)
+check(".gitignore excludes runs/local/", "runs/local/" in read(".gitignore"))
+
 
 print()
 if failures:
