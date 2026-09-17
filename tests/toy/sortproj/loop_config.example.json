@@ -23,7 +23,7 @@
   "max_rounds": 12,
   "target": null,
   "patience": 4,
-  "epsilon": 0.0,
+  "epsilon": null,
   "epsilon_window": 10,
   "min_delta": 0.0,
   "judge_metric": false,

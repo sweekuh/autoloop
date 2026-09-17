@@ -162,6 +162,8 @@ Stopping rule, all active, whichever fires first. The user may override any valu
 
 `trial_timeout_seconds` bounds one eval. `run_trial.py` kills a trial that exceeds it and the adjudicator files it as a `crash`, so a hung candidate costs one timeout, not the night.
 
+Before writing the contract, confirm the frozen harness is installed: `${CLAUDE_SKILL_DIR}/scripts/run_trial.py`, `adjudicate.py`, and `check_stop.py` must all exist. If any is missing, follow the missing-harness rule under "Checking whether to stop" and do not start the loop.
+
 Then:
 
 1. Create branch `autoloop/<run_tag>`. If the directory is not a git repo, `git init` and commit first, because revertibility is load-bearing.
@@ -249,7 +251,7 @@ Greedy hill-climbing stalls. When the last `patience / 2` rounds (floor, minimum
 
 That threshold only has room to fire when it lands strictly before `patience` itself. At `patience ≤ 3` it coincides with (or exceeds) the patience-stop threshold, so `check_stop.py` reports `stop: true` on the very round that would have been the explore round, and exploration never gets a turn — the loop just gives up one tweak early instead. That's a fine outcome for a short, cheap run where a small patience is doing its job, but don't be surprised by it: if the point of a low-patience run is still to attempt at least one real exploration before quitting, either raise `patience` past 3, or trigger the explore round one barren round earlier than the formula above suggests.
 
-Rewinding the branch to an earlier kept commit is not allowed. `check_stop.py` takes best-so-far as the best of every `keep` row, so a rewound branch sits below best-so-far and can never produce a keep again; the arbiter would count every round after the rewind as barren no matter what the branch does. If a kept change looks like measurement noise in hindsight, propose its revert as an `explore:` candidate and evaluate it like any other candidate. If it wins, it becomes a `keep` row with its own commit, and the log stays monotone.
+Rewinding the branch to an earlier kept commit is not allowed. `check_stop.py` takes best-so-far as the best of every valid `keep` row, so after a rewind every candidate still has to beat the global best rather than the branch it now sits on: the rewound stretch goes uncredited and burns patience. If a kept change looks like measurement noise in hindsight, propose its revert as an `explore:` candidate and evaluate it like any other candidate. If it wins, it becomes a `keep` row with its own commit, and the log stays monotone.
 
 ### Autonomy
 

@@ -68,6 +68,6 @@ Three behaviors are deliberately covered by both listings, one prose case mirror
 
 The two files are still not 1:1, so don't assume they reconcile, e.g. when running skill-creator's benchmarking workflow against this skill: eval id 3 (parallel mode) is manual-only with no files, and Case 1 and Case 4 assert more than eval id 0 does (a nonzero `min_delta` grounded in a repeated baseline, worktree isolation, crash rows that don't sink a round). A case that exists in only one listing needs a new entry written before it can be run from the other.
 
-### Toy problems for test cases 1 and 4 need a real plateau
+### Toy problems live in `tests/toy/` and need a real plateau
 
-Per `TEST_PLAN.md`: the sort benchmark used to exercise the loop must be built so the obvious fix helps and further gains need 2-3 nonobvious steps (e.g. an O(n²) sort with a test suite covering stability/edge cases that a naive `sorted()` swap would break). A toy problem that resolves in one round tests nothing.
+`tests/toy/sortproj` (cases 1, 2, and 4: `runtime_ms` min with a `tests_passed` gate) and `tests/toy/checkproj` (case 7: a bounded `checks_passed` with `target` 10 and a `lint_errors` gate) are the toy projects `TEST_PLAN.md` and the eval suite assume; copy one into a scratch git repo and run the case prompt against it. sortproj's plateau is deliberate: four inefficiencies of decreasing cost, each guarded by tests a naive fix breaks (`naive_impl.py` proves it: faster, and 38 of 42 tests). `tests/check.py` runs both benches small on every CI platform. The spoilers are in `tests/toy/README.md`; never show that section to the agent running the loop. A toy problem that resolves in one round tests nothing.

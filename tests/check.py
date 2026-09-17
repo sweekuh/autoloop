@@ -444,7 +444,8 @@ else:
     check("update_check.py binds GIT_BIN via find_git()", "GIT_BIN = find_git()" in _uc_src)
     # The import line, not the call: the docstring legitimately names shutil.which
     # in prose to explain why it is avoided, and no import means no call.
-    check("update_check.py no longer imports shutil", "import shutil" not in _uc_src)
+    check("update_check.py no longer imports shutil",
+          re.search(r"^\s*(import shutil|from shutil import)", _uc_src, re.M) is None)
 
 if _uc is not None and callable(getattr(_uc, "find_git", None)):
     _base = tempfile.mkdtemp()
@@ -543,7 +544,7 @@ check("SKILL.md description stays under the 1536-char listing limit",
 
 check("SKILL.md tells the loop what to do when scripts/ is missing",
       "the frozen harness is missing" in _skill)
-_bare = [ln for ln in _skill_lines if ln.strip().startswith(("python <", "python $"))]
+_bare = [ln for ln in _skill_lines if ln.strip().startswith("python ")]
 check("SKILL.md command lines use python3, never bare python",
       not _bare, str(_bare))
 

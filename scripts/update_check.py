@@ -55,17 +55,17 @@ def find_git():
     current directory to the search on Windows (CPython 3.11's shutil.which
     inserts os.curdir at the front of the PATH list), and the skill runs with
     the cwd set to whatever project is being optimized - a git.exe planted
-    there must not win. So only the directories listed in PATH are consulted,
-    never the cwd: empty entries and "." (either spelling; both mean cwd) are
-    skipped, and the names tried are the bare "git" plus, on Windows, "git"
-    with each PATHEXT suffix.
+    there must not win. So only absolute directories listed in PATH are
+    consulted, never the cwd: empty entries, ".", and any other relative entry
+    (which would resolve against the cwd) are skipped, and the names tried
+    are the bare "git" plus, on Windows, "git" with each PATHEXT suffix.
     """
     names = ["git"]
     if os.name == "nt":
         pathext = os.environ.get("PATHEXT", ".EXE;.CMD;.BAT;.COM")
         names += ["git" + ext for ext in pathext.split(os.pathsep) if ext]
     for d in os.environ.get("PATH", "").split(os.pathsep):
-        if not d or os.path.normpath(d) == os.curdir:
+        if not d or not os.path.isabs(d):
             continue
         for name in names:
             candidate = os.path.join(d, name)
