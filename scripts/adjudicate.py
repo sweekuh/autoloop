@@ -25,8 +25,9 @@ the two scripts cannot disagree about what a keep is:
      primary looks like. The row's description records which gate and by how
      much, because those rows map the boundary of the search space.
   3. Among the survivors, the best primary is `keep` if it beats best-so-far
-     (the best valid keep already in the results file) by at least min_delta,
-     strictly better when min_delta is 0. Every other survivor is `discard`.
+     (the best valid keep already in the results file) by at least the noise
+     floor, max(min_delta, min_delta_pct% of best-so-far), strictly better when
+     the floor is 0. Every other survivor is `discard`.
   4. Round 0 is the baseline: exactly one candidate, kept if it ran and passes
      every gate. A baseline that fails a gate or crashes produces no row and a
      reason telling the agent to resolve the harness with the user first.
@@ -117,7 +118,6 @@ def main():
                           "warnings": warnings}))
         return 0
     gates = rules["gates"]
-    min_delta = rules["min_delta"]
 
     rows_seen = check_stop.load_rows(args.results, warnings) if os.path.exists(args.results) else []
     rounds = check_stop.group_rounds(rows_seen, rules, warnings)
@@ -164,6 +164,12 @@ def main():
         out["reason"] = "no valid baseline in the results file; run round 0 first"
         print(json.dumps(out))
         return 0
+    floor = check_stop.noise_floor(best, rules)
+    out["noise_floor"] = floor
+    if check_stop.floor_blocks_all(best, rules):
+        warnings.append(
+            f"noise floor {floor:.6g} is at or above best-so-far {best:.6g}: no candidate can be "
+            f"kept from here; set min_delta_pct instead of an absolute min_delta for a metric that shrinks")
 
     survivors = []
     labelled = []
@@ -194,14 +200,14 @@ def main():
     if survivors:
         key = (lambda c: c["trial"]["primary"])
         top = min(survivors, key=key) if direction == "min" else max(survivors, key=key)
-        if check_stop.improves(top["trial"]["primary"], best, direction, min_delta):
+        if check_stop.improves(top["trial"]["primary"], best, direction, floor):
             keep_id = top.get("candidate")
             keep_commit = top.get("commit")
             out["reason"] = (f"keep candidate {clean(keep_id, 40)}: {top['trial']['primary']:.6g} beats "
-                             f"best-so-far {best:.6g} by at least min_delta {min_delta:.6g}")
+                             f"best-so-far {best:.6g} by at least the noise floor {floor:.6g}")
         else:
             out["reason"] = (f"no keep: best survivor {top['trial']['primary']:.6g} does not beat "
-                             f"best-so-far {best:.6g} by min_delta {min_delta:.6g}")
+                             f"best-so-far {best:.6g} by the noise floor {floor:.6g}")
     else:
         out["reason"] = "no keep: every candidate crashed or failed a gate"
 

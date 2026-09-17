@@ -1,7 +1,9 @@
 {
   "goal": "Fix app.py until all 10 checks in bench.py pass, without introducing a lint error",
   "run_tag": "checkproj",
-  "mutable_paths": ["app.py"],
+  "mutable_paths": [
+    "app.py"
+  ],
   "eval_command": "python3 bench.py > run.log 2>&1",
   "primary": {
     "name": "checks_passed",
@@ -26,6 +28,7 @@
   "epsilon": null,
   "epsilon_window": 10,
   "min_delta": 0.0,
+  "min_delta_pct": 0.0,
   "judge_metric": false,
   "judge_panel_size": 3,
   "judge_prompt_path": null

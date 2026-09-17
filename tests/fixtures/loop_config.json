@@ -1,7 +1,9 @@
 {
   "goal": "fixture: exercise check_stop.py without a live loop",
   "run_tag": "fixture",
-  "mutable_paths": ["src/sorter.py"],
+  "mutable_paths": [
+    "src/sorter.py"
+  ],
   "eval_command": "python3 bench.py > run.log 2>&1",
   "primary": {
     "name": "runtime_ms",
@@ -26,5 +28,7 @@
   "epsilon_window": 10,
   "judge_metric": false,
   "judge_panel_size": 3,
-  "judge_prompt_path": null
+  "judge_prompt_path": null,
+  "min_delta": 0.0,
+  "min_delta_pct": 0.0
 }

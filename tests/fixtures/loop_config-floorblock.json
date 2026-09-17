@@ -1,14 +1,14 @@
 {
-  "goal": "fixture: a bounded primary that reaches its target",
-  "run_tag": "fixture-target",
+  "goal": "fixture: an absolute floor that blocks every keep",
+  "run_tag": "fixture-floorblock",
   "mutable_paths": [
     "src/sorter.py"
   ],
   "eval_command": "python3 bench.py > run.log 2>&1",
   "primary": {
-    "name": "tests_passed",
-    "extract": "grep '^tests_passed:' run.log",
-    "direction": "max"
+    "name": "runtime_ms",
+    "extract": "grep '^runtime_ms:' run.log",
+    "direction": "min"
   },
   "counter_metrics": [
     {
@@ -29,7 +29,6 @@
   "judge_metric": false,
   "judge_panel_size": 3,
   "judge_prompt_path": null,
-  "target": 16,
-  "min_delta": 0.0,
+  "min_delta": 90.0,
   "min_delta_pct": 0.0
 }

@@ -71,10 +71,10 @@ Establish these from conversation context where possible, by asking where not:
 - **Mutable paths**: exact files the loop may edit. Everything else is read-only.
 - **Eval command**: one shell command that runs a trial end to end and prints the metrics.
 - **Determinism**: fix every source of randomness inside the eval (seeds, a fixed input, a pinned iteration count) so two runs of the unmodified artifact agree. Whatever spread remains is what `min_delta` is for.
-- **Primary metric**: name, extraction pattern (a greppable line such as `runtime_ms: 842.3`), direction (`min` or `max`), and — for a noisy metric — its noise floor `min_delta`: a keep must beat best-so-far by at least this much. Default 0, but wall-clock timings should never run with 0.
+- **Primary metric**: name, extraction pattern (a greppable line such as `runtime_ms: 842.3`), direction (`min` or `max`), and — for a noisy metric — its noise floor: `min_delta_pct`, a percentage of best-so-far, for any metric whose noise scales with its value (wall-clock above all), or `min_delta` in metric units for a metric with a fixed resolution. A keep must beat best-so-far by the larger of the two. Both default to 0, but a wall-clock primary should never run with both at 0.
 - **Counter-metrics**: at least one, each with extraction pattern, direction, and hard threshold.
-- **Trial cost**: wall-clock and money per trial.
-- **Budget**: max rounds, and `candidates_per_round` if running candidates in parallel.
+- **Trial cost**: wall-clock and money per trial. Running the eval command once by hand here, to measure it, is allowed: that measurement is not a trial and produces no row. Set `trial_timeout_seconds` to several times what you saw.
+- **Budget**: max rounds, and `candidates_per_round` if running candidates in parallel. `max_rounds` counts round 0, so a budget of 12 is 11 mutating rounds; say so when confirming the contract.
 - **Target**, if the primary has a known bound: the value at which the run is done. A bounded metric with no target cannot terminate on success, only on exhaustion.
 - **Run tag**: short, and **unique within this project**. It names the branch and the results file, so reusing a previous run's tag overwrites that run's log. Check for existing `results-*.tsv` first and pick a different tag on collision.
 
@@ -84,8 +84,10 @@ Before qualifying, look for earlier runs in this project and read them if they e
 
 ```bash
 ls results-*.tsv 2>/dev/null
-git log --oneline autoloop/* 2>/dev/null
+git branch --list 'autoloop/*'
 ```
+
+(`git log autoloop/*` looks right and finds nothing: git reads the unexpanded glob as a pathspec.)
 
 Read at most the **3 most recent** `results-*.tsv` files, newest first. They are full trial logs and will flood context if you read every run in a long-lived project.
 
@@ -145,6 +147,7 @@ Write `loop_config.json` and get explicit user confirmation before looping. The 
   "epsilon": null,
   "epsilon_window": 10,
   "min_delta": 0.0,
+  "min_delta_pct": 0.0,
   "judge_metric": false,
   "judge_panel_size": 3,
   "judge_prompt_path": null
@@ -155,7 +158,7 @@ Stopping rule, all active, whichever fires first. The user may override any valu
 
 - **target**: stop when best-so-far reaches this value in the configured direction. Optional, default `null` (never fires). Set it whenever the primary has a known bound - a pass count, a recall, a percentage - because none of the other conditions can express "done": a run that maxes out its metric otherwise burns `patience` rounds proposing candidates that provably cannot improve.
 - **patience**: stop after this many consecutive rounds with no keep. Default 8.
-- **epsilon over epsilon_window**: stop when total improvement in best-so-far across the last `epsilon_window` rounds falls below `epsilon`, in metric units. Default window 10. Leave `epsilon` as `null` unless the user gives a number: `check_stop.py` then derives 0.5% of the baseline value from the baseline row and reports it as `epsilon_effective`. A number you do set must be at least 2x `min_delta`, or a single noise-floor keep inside the window reads as progress and the condition never fires. `0` disables it.
+- **epsilon over epsilon_window**: stop when total improvement in best-so-far across the last `epsilon_window` rounds falls below `epsilon`, in metric units. Default window 10. Leave `epsilon` as `null` unless the user gives a number: `check_stop.py` then derives the larger of 0.5% of the baseline value and twice the noise floor at best-so-far, and reports it as `epsilon_effective`. A number you do set must be at least twice the noise floor, or a single floor-sized keep inside the window reads as progress and the condition never fires. `0` disables it.
 - **max_rounds**: hard cap.
 
 `target` is checked before `patience` so a finished run is not filed under the same stop reason as a stalled one.
@@ -184,7 +187,7 @@ Round 0 is always the unmodified artifact, `candidates_per_round` forced to 1. R
 python3 ${CLAUDE_SKILL_DIR}/scripts/run_trial.py --config loop_config.json
 ```
 
-It runs the eval command under `trial_timeout_seconds`, applies every `extract` pattern, and prints one JSON line with the primary and the counter-metrics. Put that line into `candidates.json` as `[{"candidate": "0", "commit": "-", "description": "baseline", "trial": <the JSON line>}]` and adjudicate round 0:
+It runs the eval command under `trial_timeout_seconds`, applies every `extract` pattern, and prints one JSON line with the primary and the counter-metrics. Put that line into `candidates.json` as `[{"candidate": "0", "commit": "<git rev-parse --short HEAD>", "description": "baseline", "trial": <the JSON line>}]`, so the log names the commit a keepless round resets to, and adjudicate round 0:
 
 ```bash
 python3 ${CLAUDE_SKILL_DIR}/scripts/adjudicate.py --config loop_config.json --results results-<run_tag>.tsv --round 0 --candidates candidates.json
@@ -194,7 +197,7 @@ Append the row it prints to `results-<run_tag>.tsv`. If it prints no row, its `r
 
 The baseline also calibrates the counter-metric thresholds. If the user gave a threshold that the baseline already violates, stop and resolve it with them rather than starting a run where every candidate fails the gate.
 
-For a noisy primary, baseline is also where `min_delta` gets grounded: run `run_trial.py` a second time and set `min_delta` in `loop_config.json` to at least the spread between the two runs, then commit that change before round 1. A `min_delta` of 0 on a wall-clock metric means best-so-far ratchets downward on measurement luck, and the run reports jitter as progress.
+For a noisy primary, baseline is also where the noise floor gets grounded: run `run_trial.py` a second time (it produces no row; only the adjudicated first run does), take the spread between the two runs as a percentage of the baseline, round it up, and set `min_delta_pct` to at least that in `loop_config.json`; three runs give a better estimate than two when a trial is cheap. Commit that change before round 1. Use a percentage, not an absolute `min_delta`, for anything whose noise scales with its value: an absolute floor measured at the baseline stops working once the metric has shrunk past it (a 90 ms floor from a 1300 ms baseline makes every keep impossible once the artifact runs in 70 ms, and the run then discards real wins until patience fires; `check_stop.py` warns when that state is reached). A floor of 0 on a wall-clock metric means best-so-far ratchets downward on measurement luck, and the run reports jitter as progress.
 
 If the baseline crashes, fix the harness with the user. Never begin mutating on top of a broken harness.
 
@@ -210,7 +213,7 @@ Prefer the simplest change that could plausibly move the primary metric. When a 
 
 ### Evaluating candidates
 
-**Sequential (one candidate per round).** Edit only files in `mutable_paths`, commit, then run `run_trial.py --config loop_config.json` and keep the JSON line it prints. It runs the eval command exactly as configured, under `trial_timeout_seconds`, and extracts every metric with the configured patterns. Read its `tail` only when a trial crashed. Never read `run.log` into context.
+**Sequential (one candidate per round).** Edit only files in `mutable_paths`, commit, then run `run_trial.py --config loop_config.json` and keep the JSON line it prints. It runs the eval command exactly as configured, under `trial_timeout_seconds`, and extracts every metric with the configured patterns. The `tail` it carries is for diagnosing a crash; it is not evidence about the metric. Never read `run.log` into context.
 
 **Parallel (several candidates per round).** Set `worktree_isolation` true and give every candidate its own `git worktree`, because parallel agents writing the same paths will corrupt each other. Spawn one subagent per candidate with a bounded contract: apply this specific change, commit it in the worktree, run `run_trial.py --config loop_config.json --cwd <worktree>`, and return that JSON line unchanged plus the commit sha and a one-line description. Wait for the whole batch. A subagent that returns nothing gets a candidate entry with `"trial": {"ok": false}` so the adjudicator files it as a `crash` rather than letting it sink the round. Remove the round's worktrees (`git worktree remove`) once the round is adjudicated — only kept diffs live on the branch.
 
@@ -224,10 +227,10 @@ The harness decides, not you. Write `candidates.json` with one entry per candida
 python3 ${CLAUDE_SKILL_DIR}/scripts/adjudicate.py --config loop_config.json --results results-<run_tag>.tsv --round <N> --candidates candidates.json
 ```
 
-It applies the rules in this order. A trial that crashed, timed out, or did not extract the primary is `crash`. A trial that violates any counter-metric gate, or whose counter did not extract, is `gate_fail` whatever its primary looks like, with the gate and the margin written into the description. Among the survivors the best primary is `keep` only if it beats best-so-far by at least `min_delta` (strictly better when `min_delta` is 0); every other survivor is `discard`. best-so-far comes from the results file as `check_stop.py` reads it, so the two scripts cannot disagree.
+It applies the rules in this order. A trial that crashed, timed out, or did not extract the primary is `crash`. A trial that violates any counter-metric gate, or whose counter did not extract, is `gate_fail` whatever its primary looks like, with the gate and the margin written into the description. Among the survivors the best primary is `keep` only if it beats best-so-far by at least the noise floor, the larger of `min_delta` and `min_delta_pct` percent of best-so-far (strictly better when the floor is 0); every other survivor is `discard`. best-so-far comes from the results file as `check_stop.py` reads it, so the two scripts cannot disagree.
 
 1. Append every row in its `rows` array to `results-<run_tag>.tsv` exactly as printed. Do not commit the results file, so that reverts never touch the log. **You never write a status label yourself.** If a row needs a label the script did not produce, that is a bug report, not a judgment call.
-2. If `keep` names a candidate, that candidate's commit is the new head: in sequential mode it is already on the branch; in parallel mode merge that worktree's diff onto the branch and commit. Otherwise reset the branch to the last kept commit.
+2. If `keep` names a candidate, that candidate's commit is the new head: in sequential mode it is already on the branch; in parallel mode merge that worktree's diff onto the branch and commit. Otherwise reset the branch to the last kept commit, but first keep every discarded commit reachable, so the shas in the log survive garbage collection and a discarded idea can be inspected later: `git update-ref refs/autoloop/<run_tag>/<round>-<candidate> <sha>` for each row you are about to abandon.
 3. For a `crash`, read the `tail` in its trial JSON. Fix trivial breakage (typo, missing import) and re-run `run_trial.py` once **before** adjudicating the round, so the adjudicator sees the final attempt. If the idea itself is broken, let the crash row stand and move on.
 4. `gate_fail` rows are valuable: they map the boundary of the search space. Never merge one, however good its primary.
 
@@ -249,7 +252,7 @@ This matters more than it looks. Having generated the ideas, the loop will alway
 
 Greedy hill-climbing stalls. When the last `patience / 2` rounds (floor, minimum 3) produced no keep, spend the next round on exploration rather than another small tweak: a structurally different approach, a combination of two prior near-misses, or reverting a kept change that later evidence suggests was noise. Prefix these descriptions with `explore:` so the trajectory stays auditable.
 
-That threshold only has room to fire when it lands strictly before `patience` itself. At `patience ≤ 3` it coincides with (or exceeds) the patience-stop threshold, so `check_stop.py` reports `stop: true` on the very round that would have been the explore round, and exploration never gets a turn — the loop just gives up one tweak early instead. That's a fine outcome for a short, cheap run where a small patience is doing its job, but don't be surprised by it: if the point of a low-patience run is still to attempt at least one real exploration before quitting, either raise `patience` past 3, or trigger the explore round one barren round earlier than the formula above suggests.
+That threshold only has room to fire when it lands strictly before `patience` itself. At `patience ≤ 3` it coincides with (or exceeds) the patience-stop threshold, so `check_stop.py` reports `stop: true` on the very round that would have been the explore round, and exploration never gets a turn — the loop just gives up one tweak early instead. At `patience` 4 the explore round is the last round of the run: it gets exactly one attempt and nothing can build on it. That's a fine outcome for a short, cheap run where a small patience is doing its job, but don't be surprised by it: if the point of a low-patience run is still to attempt at least one real exploration before quitting, raise `patience` to 6 or more, or trigger the explore round one barren round earlier than the formula above suggests.
 
 Rewinding the branch to an earlier kept commit is not allowed. `check_stop.py` takes best-so-far as the best of every valid `keep` row, so after a rewind every candidate still has to beat the global best rather than the branch it now sits on: the rewound stretch goes uncredited and burns patience. If a kept change looks like measurement noise in hindsight, propose its revert as an `explore:` candidate and evaluate it like any other candidate. If it wins, it becomes a `keep` row with its own commit, and the log stays monotone.
 
@@ -260,7 +263,8 @@ Once the loop begins, do not pause to ask whether to continue, whether the curre
 ## Phase 4: report
 
 - **Result**: baseline primary, best primary, absolute and percent delta, and every counter-metric at baseline versus best.
-- **Stop reason**: verbatim from `check_stop.py`.
+- **Stop reason**: verbatim from `check_stop.py`, and its `warnings` array if non-empty.
+- **Rounds**: `rounds_after_baseline` from the verdict, which is the number the user's budget was about.
 - **Recipe**: ordered kept commits with one-line descriptions, so someone can reproduce the improvement without rerunning the search.
 - **Gate failures**: which counter-metrics blocked otherwise-winning candidates. This is often the most informative part of the run, since it shows what the primary metric wanted to sacrifice.
 - **Discard themes**: categories of ideas that failed, so the next run skips them.
@@ -271,10 +275,10 @@ Leave the branch, `results-<run_tag>.tsv`, `run.log`, and `loop_config.json` in 
 
 ### Log the run to the skill's ledger
 
-After delivering the report, append an anonymized one-line summary to this skill's own local ledger:
+Before delivering the report, append an anonymized one-line summary to this skill's own local ledger, so the report can say the row is there:
 
 ```bash
-python3 ${CLAUDE_SKILL_DIR}/scripts/log_run.py --config loop_config.json --results results-<run_tag>.tsv --label "<2-4 generic words>" --stop "<stop reason, short>"
+python3 ${CLAUDE_SKILL_DIR}/scripts/log_run.py --config loop_config.json --results results-<run_tag>.tsv --label "<2-4 generic words>" --stop "<the check_stop.py reason, verbatim>"
 ```
 
 The row records only aggregate numbers - metric name, direction, round and status counts, baseline, best, improvement percent - never project names, paths, or candidate descriptions. Pick a label that names the task shape ("mobile web load time"), not the project. The row lands in `runs/local/RUNS.tsv` inside the skill checkout, which is gitignored, so logging never dirties the checkout and never blocks the self-updater. Mention the row in the final report so the user knows it is there. Maintainers publish rows to the README table with `--publish`. If the script fails or the skill dir is read-only, say so in one line and move on - logging never blocks a run.

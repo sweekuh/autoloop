@@ -23,10 +23,12 @@ none of the other three conditions can express "done". It is read from the
 frozen config like `patience` and `max_rounds`, so it is exactly as far outside
 the loop's reach as they are.
 
-`epsilon` may be null (or absent). It then means 0.5% of the baseline value,
-derived here from the baseline row and reported as `epsilon_effective`, so a
-config written without a number still gets a diminishing-returns stop. An
-explicit number keeps its meaning; 0 disables the condition.
+`epsilon` may be null (or absent). It then means the larger of 0.5% of the
+baseline value and twice the noise floor at best-so-far, derived here and
+reported as `epsilon_effective`, so a config written without a number still
+gets a diminishing-returns stop and a single floor-sized keep inside the window
+never reads as progress. An explicit number keeps its meaning; 0 disables the
+condition.
 
 max_rounds and patience are evaluated even when no keep row has ever parsed,
 so a run that only crashes still terminates instead of looping unbounded.
@@ -35,10 +37,19 @@ The results file is audited, not trusted. A `keep` row only counts as a keep
 when it has a parseable primary, is the only keep in its round, violates no
 declared counter-metric gate (the `counters` column is parsed as name=value
 pairs and checked against `counter_metrics`), and beats the previous valid best
-by at least `min_delta` (strictly better when min_delta is 0). Anything else is
-listed in `warnings` and treated as no keep. That can only end a run earlier,
-never later: an unearned keep would otherwise reset patience and hide a stall.
-The baseline (the first valid keep) is exempt from the min_delta test.
+by at least the noise floor (strictly better when the floor is 0). Anything
+else is listed in `warnings` and treated as no keep. That can only end a run
+earlier, never later: an unearned keep would otherwise reset patience and hide
+a stall. The baseline (the first valid keep) is exempt from the floor test.
+
+The noise floor is the larger of `min_delta` (metric units) and
+`min_delta_pct` percent of the current best-so-far. The relative form exists
+because an absolute floor grounded at the baseline stops working once the
+metric has shrunk past it: a 90 ms floor measured at a 1300 ms baseline makes
+every keep impossible once the artifact runs in 70 ms, and the run then
+discards real wins until patience fires. When the floor is at or above
+best-so-far on a `min` metric, a warning says so, because no candidate can be
+kept from that point on.
 
 A config whose primary has no direction is refused with stop=true, because a
 guessed direction would keep the worst candidate instead of the best.
@@ -132,25 +143,45 @@ def gate_violations(counters, gates):
     return out
 
 
-def improves(new, best, direction, min_delta):
-    """True when `new` beats `best` in `direction` by at least min_delta.
+def improves(new, best, direction, floor):
+    """True when `new` beats `best` in `direction` by at least `floor`.
 
-    With min_delta 0 the candidate must still be strictly better: a tie is not
+    With a floor of 0 the candidate must still be strictly better: a tie is not
     an improvement, and treating it as one lets a run report jitter as progress.
     """
     gain = (best - new) if direction == "min" else (new - best)
-    return gain > 0 and gain >= min_delta
+    return gain > 0 and gain >= floor
+
+
+def noise_floor(best, rules):
+    """The margin a candidate must beat `best` by: max(min_delta, min_delta_pct% of |best|)."""
+    rel = rules["min_delta_pct"] / 100.0 * abs(best) if best is not None else 0.0
+    return max(rules["min_delta"], rel)
+
+
+def floor_blocks_all(best, rules):
+    """True when the floor sits at or above best-so-far on a min metric: nothing can be kept."""
+    return (best is not None and rules["direction"] == "min" and best > 0
+            and noise_floor(best, rules) >= best)
+
+
+def _nonneg_float(v):
+    try:
+        return max(0.0, float(v or 0.0))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def rules_from_config(cfg):
     """The subset of loop_config.json that decides what counts as a keep."""
     primary_cfg = cfg.get("primary", {})
     direction = primary_cfg.get("direction", cfg.get("direction"))
-    try:
-        min_delta = float(cfg.get("min_delta") or 0.0)
-    except (TypeError, ValueError):
-        min_delta = 0.0
-    return {"direction": direction, "min_delta": min_delta, "gates": load_gates(cfg)}
+    return {
+        "direction": direction,
+        "min_delta": _nonneg_float(cfg.get("min_delta")),
+        "min_delta_pct": _nonneg_float(cfg.get("min_delta_pct")),
+        "gates": load_gates(cfg),
+    }
 
 
 def load_rows(path, warnings=None):
@@ -187,7 +218,6 @@ def group_rounds(rows, rules, warnings):
     keepless.
     """
     direction = rules["direction"]
-    min_delta = rules["min_delta"]
     gates = rules["gates"]
     buckets = {}
     for r in rows:
@@ -211,10 +241,10 @@ def group_rounds(rows, rules, warnings):
             if viol:
                 warnings.append(f"{label}: keep row violates gate ({'; '.join(viol)}); treated as no keep")
                 continue
-            if best is not None and not improves(m["_primary"], best, direction, min_delta):
+            if best is not None and not improves(m["_primary"], best, direction, noise_floor(best, rules)):
                 warnings.append(
                     f"{label}: keep row {m['_primary']:.6g} does not beat best-so-far "
-                    f"{best:.6g} by min_delta {min_delta:.6g}; treated as no keep")
+                    f"{best:.6g} by the noise floor {noise_floor(best, rules):.6g}; treated as no keep")
                 continue
             kept = m["_primary"]
             if best is None:
@@ -295,8 +325,10 @@ def main():
         barren += 1
 
     n_rounds = len(rounds)
+    has_baseline_round = any(rd["round"] == 0 for rd in rounds)
     stats = {
         "rounds": n_rounds,
+        "rounds_after_baseline": n_rounds - 1 if has_baseline_round else n_rounds,
         "candidates": len(rows),
         "baseline": baseline,
         "best": best,
@@ -304,13 +336,20 @@ def main():
     }
     if target is not None:
         stats["target"] = target
+    floor = noise_floor(best, rules) if best is not None else rules["min_delta"]
+    if floor:
+        stats["noise_floor"] = floor
+    if floor_blocks_all(best, rules):
+        warnings.append(
+            f"noise floor {floor:.6g} is at or above best-so-far {best:.6g}: no candidate can be "
+            f"kept from here; set min_delta_pct instead of an absolute min_delta for a metric that shrinks")
     if epsilon is None:
-        # null means 0.5% of the baseline value. A baseline of 0 (or none yet)
-        # leaves the condition disabled rather than inventing a floor.
-        epsilon = 0.005 * abs(baseline) if baseline else 0.0
+        # null means the larger of 0.5% of baseline and twice the noise floor at
+        # best-so-far, so one floor-sized keep in the window never reads as
+        # progress. A baseline of 0 (or none yet) leaves the condition disabled
+        # rather than inventing a value.
+        epsilon = max(0.005 * abs(baseline), 2 * floor) if baseline else 0.0
         stats["epsilon_effective"] = epsilon
-    if rules["min_delta"]:
-        stats["min_delta"] = rules["min_delta"]
 
     def verdict(stop, reason):
         print(json.dumps({"stop": stop, "reason": reason, "stats": stats, "warnings": warnings}))

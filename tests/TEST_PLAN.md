@@ -13,7 +13,7 @@ Setup for cases 1, 2 and 4 uses the ready-made toy in `tests/toy/sortproj` (`tes
 
 **Must hold**
 - `loop_config.json` contains mutable_paths, eval_command, primary with extract and direction, at least one counter_metric with a threshold, patience, max_rounds
-- the primary is wall-clock, so `min_delta` is nonzero, grounded in a repeated baseline eval (a 0 noise floor on a timing metric keeps luck)
+- the primary is wall-clock, so `min_delta_pct` is nonzero, grounded in a repeated baseline eval (a 0 noise floor on a timing metric keeps luck; an absolute `min_delta` stops working once the metric has shrunk past it)
 - `results-<run_tag>.tsv` header matches the documented 7 columns, round 0 is `keep` / `baseline`
 - every row was appended verbatim from `adjudicate.py` output and every trial ran through `run_trial.py`; the agent never wrote a status label by hand (`check_stop.py` reports zero `warnings` at the end)
 - at least 4 rounds beyond baseline

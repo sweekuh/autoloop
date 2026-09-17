@@ -258,7 +258,7 @@ v = stop_verdict(os.path.join(FIXTURES, "loop_config-audit.json"),
 check("check_stop.py verdict carries a warnings list", isinstance(v.get("warnings"), list), str(v))
 check("check_stop.py warns on a sub-min_delta keep and a gate-violating keep",
       len(v.get("warnings", [])) == 2
-      and "min_delta" in v["warnings"][0] and "violates gate" in v["warnings"][1], str(v.get("warnings")))
+      and "noise floor" in v["warnings"][0] and "violates gate" in v["warnings"][1], str(v.get("warnings")))
 check("check_stop.py treats invalid keeps as no keep (patience fires)",
       v.get("stop") is True and "patience" in v.get("reason", "")
       and v.get("stats", {}).get("rounds_since_keep") == 8 and v.get("stats", {}).get("best") == 100.0, str(v))
@@ -294,6 +294,27 @@ v = stop_verdict(_eps, os.path.join(FIXTURES, "results-epsilon.tsv"))
 check("check_stop.py keeps an explicit epsilon as given",
       v.get("stop") is False and "epsilon_effective" not in v.get("stats", {}), str(v))
 check("SKILL.md template ships epsilon null", '"epsilon": null' in _skill)
+
+# 10b. The noise floor can be relative. An absolute min_delta grounded at the
+#      baseline made every keep impossible once the metric shrank past it (seen
+#      on the first dogfood run: a 90 ms floor from a 1319 ms baseline discarded
+#      a 16.9 ms candidate against a 73 ms best). min_delta_pct scales with
+#      best-so-far; an absolute floor that blocks everything is warned about.
+v = stop_verdict(os.path.join(FIXTURES, "loop_config-pct.json"),
+                 os.path.join(FIXTURES, "results-pct.tsv"))
+check("check_stop.py applies min_delta_pct relative to best-so-far",
+      v.get("stats", {}).get("best") == 400.0 and len(v.get("warnings", [])) == 1
+      and "noise floor 35" in v["warnings"][0], str(v))
+check("check_stop.py reports the effective noise floor",
+      abs(v.get("stats", {}).get("noise_floor", 0) - 28.0) < 1e-9, str(v.get("stats")))
+check("check_stop.py derives epsilon as max(0.5% baseline, 2x floor)",
+      abs(v.get("stats", {}).get("epsilon_effective", 0) - 56.0) < 1e-9, str(v.get("stats")))
+v = stop_verdict(os.path.join(FIXTURES, "loop_config-floorblock.json"),
+                 os.path.join(FIXTURES, "results-floorblock.tsv"))
+check("check_stop.py warns when an absolute floor blocks every further keep",
+      v.get("stats", {}).get("best") == 5.0 and any("no candidate can be kept" in w for w in v.get("warnings", [])), str(v))
+check("SKILL.md template ships min_delta_pct", '"min_delta_pct": 0.0' in _skill)
+check("SKILL.md Phase 2 grounds the floor as a percentage", "set `min_delta_pct` to at least" in _skill)
 
 # 11. run_trial.py and adjudicate.py: the keep / discard / gate_fail / crash
 #     decision comes out of the frozen scripts, on a tiny fixture project. The
@@ -387,6 +408,20 @@ a2 = adjudicate(_results, 2, [{"candidate": "0", "commit": "fff6666", "descripti
 check("adjudicate.py discards a sub-min_delta improvement",
       a2.get("keep") is None and [ln.split("\t")[5] for ln in a2.get("rows", [])] == ["discard"], str(a2))
 append_rows(a2)
+_cfg_pct = dict(_cfg, min_delta=0.0, min_delta_pct=10.0)
+_cfgp_pct = os.path.join(_proj, "loop_config-pct.json")
+with io.open(_cfgp_pct, "w", encoding="utf-8") as f:
+    f.write(json.dumps(_cfg_pct))
+_saved_cfgp = _cfgp
+_cfgp = _cfgp_pct
+a3 = adjudicate(_results, 3, [
+    {"candidate": "0", "commit": "abc0001", "description": "8 percent, inside a 10 percent floor", "trial": dict(t_ok, primary=46.0)},
+    {"candidate": "1", "commit": "abc0002", "description": "12 percent, a keep", "trial": dict(t_ok, primary=44.0)},
+])
+_cfgp = _saved_cfgp
+check("adjudicate.py applies min_delta_pct against best-so-far",
+      a3.get("keep") == "1" and abs(a3.get("noise_floor", 0) - 5.0) < 1e-9
+      and [ln.split("\t")[5] for ln in a3.get("rows", [])] == ["discard", "keep"], str(a3))
 v = stop_verdict(_cfgp, _results)
 check("check_stop.py accepts what adjudicate.py wrote with zero warnings",
       v.get("stop") is False and v.get("warnings") == [] and v.get("stats", {}).get("best") == 50.0, str(v))
