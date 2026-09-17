@@ -5,7 +5,7 @@ Part of the frozen harness (see SKILL.md Phase 3). The looping agent must not
 edit it, and never assigns a status label itself: it runs run_trial.py for
 each candidate, hands the results here, and appends the rows this prints:
 
-  python3 <skill_dir>/scripts/adjudicate.py --config loop_config.json \
+  python3 ${CLAUDE_SKILL_DIR}/scripts/adjudicate.py --config loop_config.json \
       --results results-<run_tag>.tsv --round N --candidates candidates.json
 
 candidates.json is a list, one entry per candidate in the round:

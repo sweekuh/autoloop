@@ -24,7 +24,7 @@ Autoloop generalizes the karpathy/autoresearch loop: mutate one artifact, evalua
 
 The original works because four properties hold. Checking them is the first job on every invocation, because the loop produces confident garbage when they don't.
 
-1. **Frozen evaluator.** The eval command, metric extraction, counter-metrics, and stopping rule are untouchable once the loop starts. A loop that can edit its own grader will report that every trial improved.
+1. **Frozen evaluator.** The eval command, metric extraction, counter-metrics, and stopping rule are untouchable once the loop starts, and so are the scripts under `scripts/` that apply them. A loop that can edit its own grader will report that every trial improved.
 2. **Single scalar primary metric with a direction.** Multi-objective goals collapse to one primary number plus hard-gated counter-metrics (below), never to a vibes-weighted blend.
 3. **Affordable trials.** Keep/discard search assumes many trials. If one trial costs an hour or real money, say so and set the budget with the user before starting.
 4. **Isolated, revertible mutations.** A named set of mutable files under git, so every trial can be undone.
@@ -269,7 +269,7 @@ Leave the branch, `results-<run_tag>.tsv`, `run.log`, and `loop_config.json` in 
 
 ### Log the run to the skill's ledger
 
-After delivering the report, append an anonymized one-line summary to this skill's own checkout and refresh its README stats table:
+After delivering the report, append an anonymized one-line summary to this skill's own local ledger:
 
 ```bash
 python3 ${CLAUDE_SKILL_DIR}/scripts/log_run.py --config loop_config.json --results results-<run_tag>.tsv --label "<2-4 generic words>" --stop "<stop reason, short>"

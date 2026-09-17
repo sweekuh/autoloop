@@ -5,7 +5,7 @@ Part of the frozen harness (see SKILL.md Phase 3). The looping agent must not
 edit it. It exists so that the numbers a round is judged on come out of a
 script that reads loop_config.json, not out of the agent's reading of a log:
 
-  python3 <skill_dir>/scripts/run_trial.py --config loop_config.json [--cwd DIR]
+  python3 ${CLAUDE_SKILL_DIR}/scripts/run_trial.py --config loop_config.json [--cwd DIR]
 
 It runs `eval_command` in --cwd (default: the current directory, which for a
 parallel candidate is its worktree) under `trial_timeout_seconds`, then runs

@@ -24,6 +24,10 @@
           "type": "mechanical"
         },
         {
+          "text": "Every trial ran through run_trial.py and every results row was appended verbatim from adjudicate.py output; check_stop.py reports zero warnings at the end of the run (no hand-written status labels)",
+          "type": "mechanical"
+        },
+        {
           "text": "results-<run_tag>.tsv is untracked by git (never committed)",
           "type": "mechanical"
         },
@@ -166,7 +170,7 @@
       "runner": "manual-claude-code",
       "assertions": [
         {
-          "text": "Before any Phase 0 qualification, the skill runs `python <skill_dir>/scripts/update_check.py` and acts on its final JSON verdict",
+          "text": "Before any Phase 0 qualification, the skill runs `python3 ${CLAUDE_SKILL_DIR}/scripts/update_check.py` and acts on its final JSON verdict",
           "type": "manual"
         },
         {

@@ -4,9 +4,9 @@ Thanks for helping. This repo **is** a single Claude Code skill package — not 
 
 ## The one invariant: the harness is frozen
 
-autoloop only works because the loop cannot influence its own grader. `scripts/check_stop.py` is **read-only ground truth** — the stop/continue decision has to be something the loop being evaluated can't edit, or every run will report it's still improving. The same discipline applies to the eval command and metric extraction described in `SKILL.md`.
+autoloop only works because the loop cannot influence its own grader. `scripts/run_trial.py` (runs the eval, extracts the numbers), `scripts/adjudicate.py` (keep / discard / gate_fail / crash), and `scripts/check_stop.py` (stop / continue, and an audit of the log) are **read-only ground truth** — those decisions have to be something the loop being evaluated can't edit or make for itself, or every run will report it's still improving. The agent never writes a status label; it appends what the scripts print.
 
-So: **never make `check_stop.py` (or the frozen-evaluator rules in `SKILL.md`) depend on loop state.** Change the stopping *policy* deliberately and in the open; never make it gameable. This is the change most likely to be rejected if it slips.
+So: **never make those three scripts (or the frozen-evaluator rules in `SKILL.md`) depend on loop state.** Change the stopping or keep *policy* deliberately and in the open, and only in the direction that can end a run earlier; never make it gameable. This is the change most likely to be rejected if it slips.
 
 ## Dev setup
 
@@ -27,14 +27,18 @@ One command runs everything CI runs:
 python3 tests/check.py
 ```
 
-It compiles all three helpers (`check_stop.py`, `update_check.py`, `log_run.py`), runs `check_stop.py` against the fixtures in `tests/fixtures/`, runs `update_check.py --check-only`, runs `log_run.py --dry-run` against the same fixtures, verifies both machine-readable listings parse and stay in sync with the prose cases, and guards the pure-ASCII output invariant. Exit code 0 means everything passed. CI runs exactly this on Linux, macOS, and Windows (`.github/workflows/checks.yml`).
+It compiles all five helpers, runs `check_stop.py` against the fixtures in `tests/fixtures/` (including the audit and epsilon cases), drives `run_trial.py` and `adjudicate.py` through a three-round log on the tiny `tests/fixtures/trialproj` eval, runs `update_check.py --check-only`, runs `log_run.py` for real against a throwaway snapshot and asserts the checkout stays clean, runs the toy benches under `tests/toy/`, verifies both machine-readable listings parse and stay in sync with the prose cases, and guards the pure-ASCII output invariant. Exit code 0 means everything passed. CI runs exactly this on Linux, macOS, and Windows (`.github/workflows/checks.yml`).
 
 To run a piece by hand:
 
 ```bash
 # check_stop.py the way a live loop invokes it (fixtures stand in for a real run)
 python3 scripts/check_stop.py --config tests/fixtures/loop_config.json --results tests/fixtures/results.tsv
-#    -> {"stop": bool, "reason": str, "stats": {...}}
+#    -> {"stop": bool, "reason": str, "stats": {...}, "warnings": [...]}
+
+# run_trial.py on the tiny fixture eval (AUTOLOOP_FIXTURE_MODE=sleep|crash|gate for the other outcomes)
+(cd tests/fixtures/trialproj && python3 ../../../scripts/run_trial.py --config loop_config.json)
+#    -> {"ok": bool, "primary": ..., "counters": {...}, "timed_out": bool, "tail": [...]}
 
 # update_check.py (works from any path — it derives its own skill dir)
 python3 scripts/update_check.py --check-only

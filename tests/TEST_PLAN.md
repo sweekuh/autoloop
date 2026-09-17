@@ -15,6 +15,7 @@ Setup for cases 1 and 4 requires a toy problem with a **real plateau**, otherwis
 - `loop_config.json` contains mutable_paths, eval_command, primary with extract and direction, at least one counter_metric with a threshold, patience, max_rounds
 - the primary is wall-clock, so `min_delta` is nonzero, grounded in a repeated baseline eval (a 0 noise floor on a timing metric keeps luck)
 - `results-<run_tag>.tsv` header matches the documented 7 columns, round 0 is `keep` / `baseline`
+- every row was appended verbatim from `adjudicate.py` output and every trial ran through `run_trial.py`; the agent never wrote a status label by hand (`check_stop.py` reports zero `warnings` at the end)
 - at least 4 rounds beyond baseline
 - `results-<run_tag>.tsv` is untracked in git
 - commits on the `autoloop/*` branch equal the number of keep rows after baseline plus setup commits (baseline has no commit of its own)
@@ -111,7 +112,7 @@ Tests the update check baked into the skill (`scripts/update_check.py`, invoked 
 > Any autoloop invocation — e.g. the Case 1 sortproj prompt. The update check is the skill's first action regardless of the task.
 
 **Must hold**
-- before any Phase 0 qualification, the skill runs `python <skill_dir>/scripts/update_check.py` and reads its final JSON line
+- before any Phase 0 qualification, the skill runs `python3 ${CLAUDE_SKILL_DIR}/scripts/update_check.py` and reads its final JSON line
 - with the behind-but-clean setup, the verdict is `updated` / `fast-forwarded`, the checkout is fast-forwarded (`git rev-parse HEAD` equals `git rev-parse @{u}`), and the skill re-reads SKILL.md before continuing
 - run standalone in each state, the script's final JSON line is correct: up to date -> `up-to-date`; behind + clean -> `updated`; behind with an uncommitted change -> `behind-dirty`; a local commit not upstream -> `diverged`; detached HEAD or a branch with no tracking config -> `no-upstream` **and HEAD is unmoved** (a deliberate pin must survive); run from a copy whose parent has no `.git` -> `not-git` with exit 0; with `git` removed from PATH -> `not-git`; with the remote URL pointing at a nonexistent path -> `offline`
 - on `behind-dirty` and `diverged`, `update_check.py` changes nothing (HEAD unchanged, working tree untouched)
