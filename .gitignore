@@ -3,3 +3,7 @@ __pycache__/
 # per-user run ledger written by scripts/log_run.py; never tracked, so a logged
 # run cannot dirty the checkout and block update_check.py
 runs/local/
+# run.log is what an eval_command redirects into; the fixture eval and the toy
+# projects write one wherever they are run, including inside this checkout when
+# CLAUDE.md's by-hand commands are used. It is never part of the package.
+run.log
