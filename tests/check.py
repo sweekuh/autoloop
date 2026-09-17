@@ -567,7 +567,21 @@ ai = adjudicate(_bogus, 8, [{"candidate": "0", "commit": "u", "description": "ta
                              "trial": dict(t_ok, primary=80.0, counters={"tests\tpassed": 42, "tests_passed": 42})}])
 check("adjudicate.py normalises counter names so none can shift the TSV columns",
       all(len(ln.split("\t")) == 7 for ln in ai.get("rows", []))
-      and "tests_passed=42" in ai.get("rows", [""])[0] and "\t" not in ai.get("rows", [""])[0].split("\t")[4], str(ai))
+      and ai.get("rows", [""])[0].split("\t")[4] == "tests_passed=42", str(ai))
+ai = adjudicate(_bogus, 9, [{"candidate": "0", "commit": "v", "description": "two names, one gate",
+                             "trial": dict(t_ok, primary=80.0, counters={"tests passed": 10, "tests_passed": 42})}])
+check("adjudicate.py refuses a gate whose counter arrives under two colliding names",
+      [ln.split("\t")[5] for ln in ai.get("rows", [])] == ["gate_fail"]
+      and "did not extract" in ai.get("rows", [""])[0], str(ai))
+_dup = os.path.join(_proj, "results-dupcounter.tsv")
+with io.open(_dup, "w", encoding="utf-8", newline="\n") as f:
+    f.write("round\tcandidate\tcommit\tprimary\tcounters\tstatus\tdescription\n"
+            "0\t0\t-\t100\ttests_passed=42\tkeep\tbaseline\n"
+            "1\t0\tx\t50\ttests_passed=10,tests_passed=42\tkeep\ttwo values for one gate\n")
+v = stop_verdict(_cfgp, _dup)
+check("check_stop.py refuses a keep row carrying two values for one gated counter",
+      v.get("stats", {}).get("best") == 100.0
+      and any("no value for gated counter" in w for w in v.get("warnings", [])), str(v))
 _noeol = os.path.join(_proj, "results-noeol.tsv")
 with io.open(_noeol, "w", encoding="utf-8", newline="\n") as f:
     f.write("round\tcandidate\tcommit\tprimary\tcounters\tstatus\tdescription\n"

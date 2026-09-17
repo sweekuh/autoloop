@@ -181,7 +181,23 @@ def run(args):
         # map must make one candidate a crash, never abort the whole round.
         if not isinstance(trial.get("counters"), dict):
             trial["counters"] = {}
-        trial["counters"] = {k: number(v) for k, v in trial["counters"].items() if number(v) is not None}
+        # Normalise counter names the way the log will hold them, so a gate is
+        # evaluated on the same name both scripts see. Two raw names that
+        # collapse to one (e.g. "tests passed" and "tests_passed") make that
+        # counter unevaluable rather than letting the second value win.
+        counters = {}
+        for k, v in trial["counters"].items():
+            val = number(v)
+            if val is None:
+                continue
+            name = check_stop.clean_name(k)
+            if name in counters and counters[name] != val:
+                counters[name] = None
+                warnings.append(f"candidate {cid}: counter names {k!r} and another collapse to "
+                                f"{name!r} with different values; treated as not extracted")
+            else:
+                counters.setdefault(name, val)
+        trial["counters"] = {k: v for k, v in counters.items() if v is not None}
         if number(trial.get("primary")) is None:
             trial["primary"] = None
             trial["ok"] = False

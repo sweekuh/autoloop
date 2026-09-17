@@ -140,8 +140,14 @@ def parse_counters(raw):
         if not math.isfinite(v):
             # `tests_passed=inf` would otherwise satisfy any >= gate.
             continue
-        out[clean_name(name)] = v
-    return out
+        name = clean_name(name)
+        if name in out and out[name] != v:
+            # Two values for one gated counter: the gate cannot be evaluated,
+            # so neither is used and the row fails the missing-counter rule.
+            out[name] = None
+            continue
+        out.setdefault(name, v)
+    return {k: v for k, v in out.items() if v is not None}
 
 
 def load_gates(cfg):
