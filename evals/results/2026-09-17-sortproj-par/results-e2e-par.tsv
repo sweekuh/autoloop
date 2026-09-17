@@ -1,0 +1,23 @@
+round	candidate	commit	primary	counters	status	description
+0	0	-	1335.8	tests_passed=42	keep	baseline
+1	1-1	040dd75	544.3	tests_passed=42	keep	stable built-in sorted() keyed on record.key instead of insertion sort
+1	1-2	949c158	1051.9	tests_passed=42	discard	dedupe with a set instead of a list membership scan
+1	1-3	e8d5a14	1251.2	tests_passed=42	discard	format_records appends one built string instead of out = out + [line]
+2	2-1	e9aec53	166.7	tests_passed=42	keep	dedupe with a set instead of a list membership scan
+2	2-2	9fcd59e	443.3	tests_passed=42	discard	format_records appends one built string instead of out = out + [line]
+2	2-3	67d9a7f	-	-	crash	crash (timed out): hand-rolled character scanner replaces regex parse_line
+3	3-1	ef9768a	129.8	tests_passed=42	discard	module-level compiled line regex; drop redundant per-field re-validation and per-char ident loop
+3	3-2	3ee0627	72	tests_passed=42	keep	format_records appends one built string instead of out = out + [line]
+3	3-3	d887c36	132.3	tests_passed=42	discard	split-based parse_line (str.split + precompiled key regex + str checks)
+4	4-1	52ae761	20.8	tests_passed=42	discard	module-level compiled line regex; drop redundant per-field re-validation and per-char ident loop
+4	4-2	847e549	19.5	tests_passed=42	keep	split-based parse_line (str.split + precompiled key regex + str checks)
+4	4-3	e106cec	69.1	tests_passed=42	discard	format_records via one %-format with enumerate
+5	5-1	88238a5	17.7	tests_passed=42	discard	format_records via one %-format with enumerate
+5	5-2	fe13cf8	17.5	tests_passed=42	discard	parse_lines as list comprehension; newline strip inlined into parse_line
+5	5-3	77997eb	16.1	tests_passed=42	discard	explore: plain tuples instead of Record/Payload objects, sort keyed by itemgetter(0)
+6	6-1	aacb1bd	15	tests_passed=42	discard	explore: combine round-5 near-misses (tuples + %-format + list-comp/inlined strip)
+6	6-2	52a6727	20.1	tests_passed=42	discard	key validation with str methods instead of the last regex
+6	6-3	47b4b97	20	tests_passed=42	discard	fuse parse and dedupe into a single pass in process()
+7	7-1	dc700be	16	tests_passed=42	discard	explore: round-6 combo + bulk one-pass regex parse with tiling check
+7	7-2	364b0e2	13	tests_passed=42	discard	explore: round-6 combo + str-method key check + fused parse/dedupe pass
+7	7-3	503ec49	18.3	tests_passed=42	discard	explore: revert split parser to hoisted-regex parser (4-1 vs 4-2 was inside noise)

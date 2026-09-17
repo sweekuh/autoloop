@@ -1,0 +1,1 @@
+{"stop": true, "reason": "patience exhausted: 4 consecutive rounds with no improvement (patience=4)", "stats": {"rounds": 8, "candidates": 8, "baseline": 1319.3, "best": 73.3, "rounds_since_keep": 4, "epsilon_effective": 6.5965, "min_delta": 90.0}, "warnings": []}
