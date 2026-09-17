@@ -13,6 +13,9 @@ description: >-
   experiment harness, a keep/discard workflow, a stopping rule for iterative
   optimization, or a parallel search over candidate changes. Reach for it even
   when the user never says "loop" or "autoloop".
+allowed-tools: Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/*), Bash(python ${CLAUDE_SKILL_DIR}/scripts/*)
+metadata:
+  version: 0.2.0
 ---
 
 # Autoloop
@@ -41,8 +44,10 @@ Choose counter-metrics that fail loudly. Test-suite pass count, output validity,
 This skill ships its own update check, so a long unattended run never starts on a stale version — an upstream bugfix matters most precisely when the user is about to walk away for hours. Before qualifying the task, run:
 
 ```bash
-python <skill_dir>/scripts/update_check.py
+python3 ${CLAUDE_SKILL_DIR}/scripts/update_check.py
 ```
+
+Claude Code expands `${CLAUDE_SKILL_DIR}` to the directory that contains this SKILL.md; on another agent, substitute that directory by hand. On Windows the interpreter is usually named `python` rather than `python3`, so run the script with whichever exists.
 
 It fetches this skill's own upstream and, when the checkout is cleanly behind, fast-forwards it in place; otherwise it reports and touches nothing. Read the final JSON line and act on `status`:
 
@@ -226,8 +231,10 @@ It applies the rules in this order. A trial that crashed, timed out, or did not 
 
 ### Checking whether to stop
 
+If `${CLAUDE_SKILL_DIR}/scripts/check_stop.py` does not exist, the frozen harness is missing: some installers copy only SKILL.md. Do not run the loop unattended without it. Check for the file while writing the setup contract; if it is absent, say so, print the reinstall command (`git clone https://github.com/sweekuh/autoloop.git ~/.claude/skills/autoloop`, or `npx skills add sweekuh/autoloop`), and stop after Phase 1 until the user has reinstalled.
+
 ```bash
-python <skill_dir>/scripts/check_stop.py --config loop_config.json --results results-<run_tag>.tsv
+python3 ${CLAUDE_SKILL_DIR}/scripts/check_stop.py --config loop_config.json --results results-<run_tag>.tsv
 ```
 
 The script prints a JSON verdict. The script decides, and the loop obeys it.
@@ -265,7 +272,7 @@ Leave the branch, `results-<run_tag>.tsv`, `run.log`, and `loop_config.json` in 
 After delivering the report, append an anonymized one-line summary to this skill's own checkout and refresh its README stats table:
 
 ```bash
-python <skill_dir>/scripts/log_run.py --config loop_config.json --results results-<run_tag>.tsv --label "<2-4 generic words>" --stop "<stop reason, short>"
+python3 ${CLAUDE_SKILL_DIR}/scripts/log_run.py --config loop_config.json --results results-<run_tag>.tsv --label "<2-4 generic words>" --stop "<stop reason, short>"
 ```
 
 The row records only aggregate numbers - metric name, direction, round and status counts, baseline, best, improvement percent - never project names, paths, or candidate descriptions. Pick a label that names the task shape ("mobile web load time"), not the project. The row lands in `runs/local/RUNS.tsv` inside the skill checkout, which is gitignored, so logging never dirties the checkout and never blocks the self-updater. Mention the row in the final report so the user knows it is there. Maintainers publish rows to the README table with `--publish`. If the script fails or the skill dir is read-only, say so in one line and move on - logging never blocks a run.

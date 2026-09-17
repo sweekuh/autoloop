@@ -55,7 +55,7 @@ One candidate per round is the default. Raise `candidates_per_round` above 1 and
 
 ## Install
 
-Either method works. They differ only in how updates reach you.
+Either method works. They differ only in how updates reach you. Whichever you use, the skill needs its `scripts/` directory next to `SKILL.md`: a copy of `SKILL.md` on its own has no stopping rule, and the skill will refuse to run unattended without it.
 
 **With npx**, which also covers Cursor, Windsurf, Codex, and the other agents the `skills` CLI knows about:
 

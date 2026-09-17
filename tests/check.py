@@ -482,6 +482,71 @@ if _uc is not None and callable(getattr(_uc, "find_git", None)):
         else:
             os.environ["PATH"] = _old_path
 
+# 14. install-hardening: SKILL.md reaches its bundled scripts through the path
+#    Claude Code documents (${CLAUDE_SKILL_DIR}), pre-approves them in the
+#    frontmatter, invokes python3 like README and CLAUDE.md do, and tells the
+#    loop what to do when an installer copied SKILL.md without scripts/ (seen
+#    in the field: no scripts/ dir means no frozen stopping rule at all).
+_skill = read("SKILL.md")
+_skill_lines = _skill.splitlines()
+check("SKILL.md has no <skill_dir> placeholder left",
+      "<skill_dir>" not in _skill)
+for _name in ("update_check.py", "check_stop.py", "log_run.py"):
+    check(f"SKILL.md invokes {_name} as python3 ${{CLAUDE_SKILL_DIR}}/scripts/{_name}",
+          "python3 ${CLAUDE_SKILL_DIR}/scripts/" + _name in _skill)
+check("SKILL.md addresses check_stop.py via ${CLAUDE_SKILL_DIR}",
+      "${CLAUDE_SKILL_DIR}/scripts/check_stop.py" in _skill)
+
+# Frontmatter = the lines between the first two "---" lines. Plain string
+# handling on purpose: this file stays stdlib-only, so no yaml module.
+_fm = []
+_fences = 0
+for _ln in _skill_lines:
+    if _ln.strip() == "---":
+        _fences += 1
+        if _fences == 2:
+            break
+        continue
+    if _fences == 1:
+        _fm.append(_ln)
+check("SKILL.md frontmatter is delimited by two --- lines", _fences == 2)
+_allowed = [ln for ln in _fm if ln.startswith("allowed-tools:")]
+check("SKILL.md frontmatter pre-approves the bundled scripts (allowed-tools)",
+      any("scripts/" in ln for ln in _allowed), str(_allowed))
+_meta_ok = False
+_meta_detail = "no metadata: line in frontmatter"
+for _i, _ln in enumerate(_fm):
+    if _ln.rstrip() == "metadata:":
+        _nxt = _fm[_i + 1] if _i + 1 < len(_fm) else ""
+        _meta_ok = _nxt.startswith(" ") and _nxt.strip().startswith("version:")
+        _meta_detail = f"line after metadata: is {_nxt!r}"
+check("SKILL.md frontmatter carries metadata.version", _meta_ok, _meta_detail)
+
+# The description is what the skill listing shows; the documented cap is 1536.
+_desc = []
+_in_desc = False
+for _ln in _fm:
+    if _ln.startswith("description:"):
+        _in_desc = True
+        _rest = _ln[len("description:"):].strip()
+        if _rest and _rest not in (">", ">-", "|", "|-"):
+            _desc.append(_rest)
+        continue
+    if _in_desc:
+        if _ln.startswith(" "):
+            _desc.append(_ln.strip())
+        else:
+            break
+_desc_text = " ".join(_desc)
+check("SKILL.md description stays under the 1536-char listing limit",
+      0 < len(_desc_text) < 1536, f"{len(_desc_text)} chars")
+
+check("SKILL.md tells the loop what to do when scripts/ is missing",
+      "the frozen harness is missing" in _skill)
+_bare = [ln for ln in _skill_lines if ln.strip().startswith(("python <", "python $"))]
+check("SKILL.md command lines use python3, never bare python",
+      not _bare, str(_bare))
+
 print()
 if failures:
     print(f"{len(failures)} check(s) failed: " + ", ".join(failures))
