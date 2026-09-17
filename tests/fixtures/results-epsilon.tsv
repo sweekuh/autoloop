@@ -1,0 +1,14 @@
+round	candidate	commit	primary	counters	status	description
+0	0	aaaaaaa	842.0	tests_passed=42	keep	baseline
+1	0	c1	845.0	tests_passed=42	discard	no gain
+2	0	c2	845.0	tests_passed=42	discard	no gain
+3	0	c3	845.0	tests_passed=42	discard	no gain
+4	0	c4	845.0	tests_passed=42	discard	no gain
+5	0	c5	841.5	tests_passed=42	keep	small gain
+6	0	c6	844.5	tests_passed=42	discard	no gain
+7	0	c7	844.5	tests_passed=42	discard	no gain
+8	0	c8	844.5	tests_passed=42	discard	no gain
+9	0	c9	844.5	tests_passed=42	discard	no gain
+10	0	c10	844.5	tests_passed=42	discard	no gain
+11	0	c11	841.0	tests_passed=42	keep	small gain
+12	0	c12	844.0	tests_passed=42	discard	no gain

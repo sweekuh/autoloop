@@ -134,7 +134,7 @@ Write `loop_config.json` and get explicit user confirmation before looping. The 
   "max_rounds": 40,
   "target": null,
   "patience": 8,
-  "epsilon": 0.001,
+  "epsilon": null,
   "epsilon_window": 10,
   "min_delta": 0.0,
   "judge_metric": false,
@@ -147,7 +147,7 @@ Stopping rule, all active, whichever fires first. The user may override any valu
 
 - **target**: stop when best-so-far reaches this value in the configured direction. Optional, default `null` (never fires). Set it whenever the primary has a known bound - a pass count, a recall, a percentage - because none of the other conditions can express "done": a run that maxes out its metric otherwise burns `patience` rounds proposing candidates that provably cannot improve.
 - **patience**: stop after this many consecutive rounds with no keep. Default 8.
-- **epsilon over epsilon_window**: stop when total improvement in best-so-far across the last `epsilon_window` rounds falls below `epsilon`, in metric units. Defaults: window 10, epsilon 0.5% of the baseline value when the user gives no number.
+- **epsilon over epsilon_window**: stop when total improvement in best-so-far across the last `epsilon_window` rounds falls below `epsilon`, in metric units. Default window 10. Leave `epsilon` as `null` unless the user gives a number: `check_stop.py` then derives 0.5% of the baseline value from the baseline row and reports it as `epsilon_effective`. A number you do set must be at least 2x `min_delta`, or a single noise-floor keep inside the window reads as progress and the condition never fires. `0` disables it.
 - **max_rounds**: hard cap.
 
 `target` is checked before `patience` so a finished run is not filed under the same stop reason as a stalled one.
@@ -207,6 +207,8 @@ python <skill_dir>/scripts/check_stop.py --config loop_config.json --results res
 ```
 
 The script prints a JSON verdict. The script decides, and the loop obeys it.
+
+Its `warnings` array lists rows the harness would not have produced: a keep that violates a gate, a keep below the noise floor, two keeps in one round, a round label that is not a number. Those rows are not counted as keeps. Report every warning in Phase 4 and never edit the log to make one go away.
 
 This matters more than it looks. Having generated the ideas, the loop will always feel one clever change away from a breakthrough, which is exactly the optimism a frozen stopping rule exists to override. Treat `check_stop.py` the same as the eval harness: read-only ground truth.
 
