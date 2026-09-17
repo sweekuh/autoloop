@@ -35,7 +35,9 @@ def read(*parts):
 
 
 # 1. The helpers compile.
-for script in ("scripts/check_stop.py", "scripts/update_check.py", "scripts/log_run.py"):
+SCRIPTS = ("scripts/check_stop.py", "scripts/run_trial.py", "scripts/adjudicate.py",
+           "scripts/update_check.py", "scripts/log_run.py")
+for script in SCRIPTS:
     r = subprocess.run([PY, "-m", "py_compile", os.path.join(ROOT, script)],
                        capture_output=True, text=True)
     check(f"compiles: {script}", r.returncode == 0, r.stderr.strip())
@@ -169,7 +171,7 @@ check("log_run.py row has 16 fields", len(fields) == 16, str(fields))
 check("log_run.py computes baseline and best", "100" in fields and "95" in fields, str(fields))
 
 # 5. Script output stays pure ASCII (guards the non-UTF-8-console fix).
-for script in ("scripts/check_stop.py", "scripts/update_check.py", "scripts/log_run.py"):
+for script in SCRIPTS:
     src = read(script)
     bad = [c for c in src if ord(c) > 127]
     check(f"pure ASCII source: {script}", not bad, f"{len(bad)} non-ascii chars")
@@ -277,6 +279,116 @@ v = stop_verdict(_eps, os.path.join(FIXTURES, "results-epsilon.tsv"))
 check("check_stop.py keeps an explicit epsilon as given",
       v.get("stop") is False and "epsilon_effective" not in v.get("stats", {}), str(v))
 check("SKILL.md template ships epsilon null", '"epsilon": null' in _skill)
+
+# 11. run_trial.py and adjudicate.py: the keep / discard / gate_fail / crash
+#     decision comes out of the frozen scripts, on a tiny fixture project. The
+#     interpreter path is substituted into the commands so the fixture runs on
+#     Windows too (no grep, no python3 alias).
+import shutil
+_proj = os.path.join(tempfile.mkdtemp(), "proj")
+shutil.copytree(os.path.join(FIXTURES, "trialproj"), _proj)
+_cfg = json.loads(read("tests", "fixtures", "trialproj", "loop_config.json"))
+_pyq = '"' + PY + '"'
+_cfg["eval_command"] = _pyq + " bench.py > run.log 2>&1"
+_cfg["primary"]["extract"] = _pyq + " extract.py runtime_ms"
+_cfg["counter_metrics"][0]["extract"] = _pyq + " extract.py tests_passed"
+_cfgp = os.path.join(_proj, "loop_config.json")
+with io.open(_cfgp, "w", encoding="utf-8") as f:
+    f.write(json.dumps(_cfg))
+
+
+def run_trial(mode):
+    env = dict(os.environ, AUTOLOOP_FIXTURE_MODE=mode)
+    r = subprocess.run([PY, os.path.join(ROOT, "scripts", "run_trial.py"), "--config", _cfgp, "--cwd", _proj],
+                       capture_output=True, text=True, env=env)
+    try:
+        return json.loads(r.stdout.strip().splitlines()[-1])
+    except Exception:
+        return {"_stderr": r.stderr.strip(), "_rc": r.returncode}
+
+
+def adjudicate(results, rnum, cands):
+    cpath = os.path.join(_proj, f"cands-{rnum}.json")
+    with io.open(cpath, "w", encoding="utf-8") as f:
+        f.write(json.dumps(cands))
+    r = subprocess.run([PY, os.path.join(ROOT, "scripts", "adjudicate.py"), "--config", _cfgp,
+                        "--results", results, "--round", str(rnum), "--candidates", cpath],
+                       capture_output=True, text=True)
+    try:
+        return json.loads(r.stdout.strip().splitlines()[-1])
+    except Exception:
+        return {"_stderr": r.stderr.strip(), "_rc": r.returncode}
+
+
+t_ok = run_trial("ok")
+check("run_trial.py extracts the primary and the counter",
+      t_ok.get("ok") is True and t_ok.get("primary") == 123.4
+      and t_ok.get("counters", {}).get("tests_passed") == 42.0, str(t_ok))
+check("run_trial.py output is pure ASCII", all(ord(c) < 128 for c in json.dumps(t_ok)))
+t_to = run_trial("sleep")
+check("run_trial.py enforces trial_timeout_seconds",
+      t_to.get("ok") is False and t_to.get("timed_out") is True and t_to.get("elapsed_s", 99) < 15, str(t_to))
+t_cr = run_trial("crash")
+check("run_trial.py reports a crash with a tail",
+      t_cr.get("ok") is False and t_cr.get("primary") is None
+      and any("harness broke" in ln for ln in t_cr.get("tail", [])), str(t_cr))
+t_gate = run_trial("gate")
+check("run_trial.py takes the last matching line for a counter",
+      t_gate.get("ok") is True and t_gate.get("counters", {}).get("tests_passed") == 10.0, str(t_gate))
+
+_results = os.path.join(_proj, "results-fixture-trial.tsv")
+with io.open(_results, "w", encoding="utf-8", newline="\n") as f:
+    f.write("round\tcandidate\tcommit\tprimary\tcounters\tstatus\tdescription\n")
+
+
+def append_rows(verdict):
+    with io.open(_results, "a", encoding="utf-8", newline="\n") as f:
+        for line in verdict.get("rows", []):
+            f.write(line + "\n")
+
+
+a0 = adjudicate(_results, 0, [{"candidate": "0", "commit": "-", "description": "baseline", "trial": t_ok}])
+check("adjudicate.py records the baseline as keep",
+      a0.get("keep") == "0" and len(a0.get("rows", [])) == 1 and a0["rows"][0].endswith("\tkeep\tbaseline"), str(a0))
+append_rows(a0)
+better = dict(t_ok, primary=100.0)
+much = dict(t_ok, primary=50.0)
+a1 = adjudicate(_results, 1, [
+    {"candidate": "0", "commit": "aaa1111", "description": "tighter loop", "trial": better},
+    {"candidate": "1", "commit": "bbb2222", "description": "drop the checks\tfor speed", "trial": dict(t_gate, primary=40.0)},
+    {"candidate": "2", "commit": "ccc3333", "description": "typo", "trial": t_cr},
+    {"candidate": "3", "commit": "ddd4444", "description": "hung", "trial": t_to},
+    {"candidate": "4", "commit": "eee5555", "description": "memoize", "trial": much},
+])
+_statuses = [ln.split("\t")[5] for ln in a1.get("rows", [])]
+check("adjudicate.py labels crash, gate_fail, discard and keep",
+      _statuses == ["discard", "gate_fail", "crash", "crash", "keep"] and a1.get("keep") == "4"
+      and a1.get("keep_commit") == "eee5555", str(a1))
+check("adjudicate.py refuses a gate-violating winner",
+      "gate_fail (tests_passed=10 fails >= 42)" in a1.get("rows", ["", ""])[1], str(a1.get("rows")))
+check("adjudicate.py rows have 7 tab-separated fields and no embedded tabs in descriptions",
+      all(len(ln.split("\t")) == 7 for ln in a1.get("rows", [])), str(a1.get("rows")))
+append_rows(a1)
+a2 = adjudicate(_results, 2, [{"candidate": "0", "commit": "fff6666", "description": "noise", "trial": dict(t_ok, primary=49.7)}])
+check("adjudicate.py discards a sub-min_delta improvement",
+      a2.get("keep") is None and [ln.split("\t")[5] for ln in a2.get("rows", [])] == ["discard"], str(a2))
+append_rows(a2)
+v = stop_verdict(_cfgp, _results)
+check("check_stop.py accepts what adjudicate.py wrote with zero warnings",
+      v.get("stop") is False and v.get("warnings") == [] and v.get("stats", {}).get("best") == 50.0, str(v))
+_bad = os.path.join(_proj, "results-bad.tsv")
+with io.open(_bad, "w", encoding="utf-8", newline="\n") as f:
+    f.write("round\tcandidate\tcommit\tprimary\tcounters\tstatus\tdescription\n")
+ab = adjudicate(_bad, 0, [{"candidate": "0", "commit": "-", "description": "baseline", "trial": t_gate}])
+check("adjudicate.py refuses a baseline that violates a gate",
+      ab.get("rows") == [] and "gate" in ab.get("reason", ""), str(ab))
+ab = adjudicate(_bad, 1, [{"candidate": "0", "commit": "x", "description": "x", "trial": t_ok}])
+check("adjudicate.py refuses to adjudicate a round with no baseline",
+      ab.get("rows") == [] and "baseline" in ab.get("reason", ""), str(ab))
+check("SKILL.md shells out to run_trial.py and adjudicate.py",
+      "scripts/run_trial.py" in _skill and "scripts/adjudicate.py" in _skill)
+check("SKILL.md says the agent never writes a status label",
+      "never write a status label" in _skill)
 
 
 print()

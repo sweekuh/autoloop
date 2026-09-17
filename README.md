@@ -41,7 +41,7 @@ Every run also declares a counter-metric: something the loop is forbidden to mak
 - **Phase 3, loop.** Each round proposes candidates, evaluates them with the frozen harness, keeps at most one, and logs all of them including the failures.
 - **Phase 4, report.** Baseline against best, the ordered list of kept commits so the win can be reproduced without rerunning the search, which gates blocked which candidates, and whether more search is worth paying for.
 
-`scripts/check_stop.py` decides when to stop and the loop obeys it. Four conditions, first to fire wins: target (best-so-far reaches a declared goal value, for a metric with a known bound), patience (N rounds with no keep), epsilon (gain across a trailing window drops below a threshold), and max_rounds. It lives in a separate script for the same reason the evaluator is frozen. Having just generated the ideas, the loop always feels one change away from a breakthrough.
+Three scripts make the decisions the loop is not allowed to make for itself. `scripts/run_trial.py` runs each trial under a timeout and extracts the numbers. `scripts/adjudicate.py` turns them into keep, discard, gate_fail, or crash, applying the counter-metric gates and the noise floor. `scripts/check_stop.py` decides when to stop: four conditions, first to fire wins: target (best-so-far reaches a declared goal value, for a metric with a known bound), patience (N rounds with no keep), epsilon (gain across a trailing window drops below a threshold, defaulting to 0.5% of baseline), and max_rounds. It also audits the log and refuses to count a keep that violates a gate or sits below the noise floor. They live in separate scripts for the same reason the evaluator is frozen. Having just generated the ideas, the loop always feels one change away from a breakthrough.
 
 One candidate per round is the default. Raise `candidates_per_round` above 1 and each candidate gets its own git worktree, which buys wall-clock time and costs sample efficiency, since candidates in the same round can't learn from each other's results.
 
@@ -49,7 +49,7 @@ One candidate per round is the default. Raise `candidates_per_round` above 1 and
 
 - [Claude Code](https://docs.claude.com/en/docs/claude-code)
 - `git`, because every trial is a commit and being able to revert is load-bearing
-- `python3`, for `check_stop.py` and the update check. No third-party packages.
+- `python3`, for the harness scripts and the update check. No third-party packages.
 
 ## Install
 
@@ -93,13 +93,16 @@ git -C ~/.claude/skills/autoloop pull --ff-only
 
 ```
 SKILL.md                 the skill definition Claude Code loads
-scripts/check_stop.py    frozen stopping-rule arbiter
+scripts/run_trial.py     frozen: runs one trial under a timeout, extracts metrics
+scripts/adjudicate.py    frozen: keep / discard / gate_fail / crash for a round
+scripts/check_stop.py    frozen: stopping-rule arbiter, audits the log
 scripts/update_check.py  update check that runs before Phase 0
-scripts/log_run.py       appends an anonymized run summary to runs/RUNS.tsv
-runs/RUNS.tsv            the run ledger behind the Field results table
+scripts/log_run.py       appends an anonymized run summary to the ledger
+runs/RUNS.tsv            the published ledger behind the Field results table
 tests/check.py           mechanical checks, same ones CI runs
 tests/TEST_PLAN.md       cases for running the skill by hand
-tests/fixtures/          sample config and results for check_stop.py
+tests/fixtures/          sample configs, results, and a tiny trial project
+tests/toy/               toy projects with a real plateau for the test plan
 evals/evals.json         eval suite, skill-creator format
 ```
 

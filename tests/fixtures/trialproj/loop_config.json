@@ -1,0 +1,32 @@
+{
+  "goal": "fixture: exercise run_trial.py and adjudicate.py; tests/check.py substitutes the interpreter path into the commands",
+  "run_tag": "fixture-trial",
+  "mutable_paths": ["bench.py"],
+  "eval_command": "python3 bench.py > run.log 2>&1",
+  "primary": {
+    "name": "runtime_ms",
+    "extract": "python3 extract.py runtime_ms",
+    "direction": "min"
+  },
+  "counter_metrics": [
+    {
+      "name": "tests_passed",
+      "extract": "python3 extract.py tests_passed",
+      "direction": "max",
+      "threshold": 42,
+      "comparator": ">="
+    }
+  ],
+  "candidates_per_round": 1,
+  "worktree_isolation": false,
+  "trial_timeout_seconds": 3,
+  "max_rounds": 40,
+  "target": null,
+  "patience": 8,
+  "epsilon": null,
+  "epsilon_window": 10,
+  "min_delta": 0.5,
+  "judge_metric": false,
+  "judge_panel_size": 3,
+  "judge_prompt_path": null
+}

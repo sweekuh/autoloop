@@ -152,6 +152,8 @@ Stopping rule, all active, whichever fires first. The user may override any valu
 
 `target` is checked before `patience` so a finished run is not filed under the same stop reason as a stalled one.
 
+`trial_timeout_seconds` bounds one eval. `run_trial.py` kills a trial that exceeds it and the adjudicator files it as a `crash`, so a hung candidate costs one timeout, not the night.
+
 Then:
 
 1. Create branch `autoloop/<run_tag>`. If the directory is not a git repo, `git init` and commit first, because revertibility is load-bearing.
@@ -166,11 +168,23 @@ round	candidate	commit	primary	counters	status	description
 
 ## Phase 2: baseline
 
-Round 0 is always the unmodified artifact, `candidates_per_round` forced to 1. Run the eval command as-is, record the primary and every counter-metric, status `keep`, description `baseline`. Baseline needs no commit of its own — it's the artifact exactly as committed at the end of Phase 1, evaluated as-is — so the branch's commit count is the number of keep rows *after* baseline plus setup commits, not keep rows including baseline.
+Round 0 is always the unmodified artifact, `candidates_per_round` forced to 1. Run it through the harness, never by hand:
+
+```bash
+python3 ${CLAUDE_SKILL_DIR}/scripts/run_trial.py --config loop_config.json
+```
+
+It runs the eval command under `trial_timeout_seconds`, applies every `extract` pattern, and prints one JSON line with the primary and the counter-metrics. Put that line into `candidates.json` as `[{"candidate": "0", "commit": "-", "description": "baseline", "trial": <the JSON line>}]` and adjudicate round 0:
+
+```bash
+python3 ${CLAUDE_SKILL_DIR}/scripts/adjudicate.py --config loop_config.json --results results-<run_tag>.tsv --round 0 --candidates candidates.json
+```
+
+Append the row it prints to `results-<run_tag>.tsv`. If it prints no row, its `reason` says why (the baseline crashed, a counter-metric did not extract, or the baseline already violates a gate) and the run does not start until that is resolved with the user. Baseline needs no commit of its own — it's the artifact exactly as committed at the end of Phase 1, evaluated as-is — so the branch's commit count is the number of keep rows *after* baseline plus setup commits, not keep rows including baseline.
 
 The baseline also calibrates the counter-metric thresholds. If the user gave a threshold that the baseline already violates, stop and resolve it with them rather than starting a run where every candidate fails the gate.
 
-For a noisy primary, baseline is also where `min_delta` gets grounded: run the eval a second time and set `min_delta` to at least the spread between the two runs. A `min_delta` of 0 on a wall-clock metric means best-so-far ratchets downward on measurement luck, and the run reports jitter as progress.
+For a noisy primary, baseline is also where `min_delta` gets grounded: run `run_trial.py` a second time and set `min_delta` in `loop_config.json` to at least the spread between the two runs, then commit that change before round 1. A `min_delta` of 0 on a wall-clock metric means best-so-far ratchets downward on measurement luck, and the run reports jitter as progress.
 
 If the baseline crashes, fix the harness with the user. Never begin mutating on top of a broken harness.
 
@@ -186,19 +200,26 @@ Prefer the simplest change that could plausibly move the primary metric. When a 
 
 ### Evaluating candidates
 
-**Sequential (one candidate per round).** Edit only files in `mutable_paths`, commit, run the eval command exactly as configured with output redirected to `run.log`, extract metrics with the configured patterns. Never let raw eval output flood context.
+**Sequential (one candidate per round).** Edit only files in `mutable_paths`, commit, then run `run_trial.py --config loop_config.json` and keep the JSON line it prints. It runs the eval command exactly as configured, under `trial_timeout_seconds`, and extracts every metric with the configured patterns. Read its `tail` only when a trial crashed. Never read `run.log` into context.
 
-**Parallel (several candidates per round).** Set `worktree_isolation` true and give every candidate its own `git worktree`, because parallel agents writing the same paths will corrupt each other. Spawn one subagent per candidate with a bounded contract: apply this specific change, run the eval command, return the extracted primary and counter-metric values plus a one-line description. Wait for the whole batch, then treat a crashed or missing result as a `crash` row rather than letting it sink the round. Remove the round's worktrees (`git worktree remove`) once the round is adjudicated — only kept diffs live on the branch.
+**Parallel (several candidates per round).** Set `worktree_isolation` true and give every candidate its own `git worktree`, because parallel agents writing the same paths will corrupt each other. Spawn one subagent per candidate with a bounded contract: apply this specific change, commit it in the worktree, run `run_trial.py --config loop_config.json --cwd <worktree>`, and return that JSON line unchanged plus the commit sha and a one-line description. Wait for the whole batch. A subagent that returns nothing gets a candidate entry with `"trial": {"ok": false}` so the adjudicator files it as a `crash` rather than letting it sink the round. Remove the round's worktrees (`git worktree remove`) once the round is adjudicated — only kept diffs live on the branch.
 
 Running N candidates in parallel explores less efficiently per token than running N sequential trials, because siblings cannot learn from each other's results. Parallelism buys wall-clock, and it costs sample efficiency. Leave `candidates_per_round` at 1 and raise it only when wall-clock is the binding constraint — check that it actually is before raising it. If a single trial already runs in well under a second, the overhead of dispatching and coordinating parallel subagents can easily exceed whatever wall-clock a sequential search would have spent, making a raised `candidates_per_round` a net loss on both axes instead of a trade. Parallelism pays off when the eval command itself is the slow part of a round (minutes, not milliseconds), not by default.
 
 ### Keep or discard
 
-1. Any candidate whose primary metric failed to extract is a `crash`. Read the tail of its log. Fix trivial breakage (typo, missing import) and re-run once. If the idea itself is broken, log and move on.
-2. Any candidate violating a counter-metric gate is `gate_fail`, regardless of how good its primary looks. Log which gate and by how much. These rows are valuable: they map the boundary of the search space.
-3. Among survivors, take the best primary. If it beats best-so-far in the configured direction by at least `min_delta`, keep it: merge that worktree's diff onto the branch and commit. Every other candidate in the round is `discard`.
-4. If no survivor beats best-so-far, the round keeps nothing. Reset the branch to the last kept commit.
-5. Append one row per candidate to `results-<run_tag>.tsv`. Do not commit it, so that reverts never touch the log.
+The harness decides, not you. Write `candidates.json` with one entry per candidate, `{"candidate": "<id>", "commit": "<sha>", "description": "<one line>", "trial": <run_trial JSON line>}`, then:
+
+```bash
+python3 ${CLAUDE_SKILL_DIR}/scripts/adjudicate.py --config loop_config.json --results results-<run_tag>.tsv --round <N> --candidates candidates.json
+```
+
+It applies the rules in this order. A trial that crashed, timed out, or did not extract the primary is `crash`. A trial that violates any counter-metric gate, or whose counter did not extract, is `gate_fail` whatever its primary looks like, with the gate and the margin written into the description. Among the survivors the best primary is `keep` only if it beats best-so-far by at least `min_delta` (strictly better when `min_delta` is 0); every other survivor is `discard`. best-so-far comes from the results file as `check_stop.py` reads it, so the two scripts cannot disagree.
+
+1. Append every row in its `rows` array to `results-<run_tag>.tsv` exactly as printed. Do not commit the results file, so that reverts never touch the log. **You never write a status label yourself.** If a row needs a label the script did not produce, that is a bug report, not a judgment call.
+2. If `keep` names a candidate, that candidate's commit is the new head: in sequential mode it is already on the branch; in parallel mode merge that worktree's diff onto the branch and commit. Otherwise reset the branch to the last kept commit.
+3. For a `crash`, read the `tail` in its trial JSON. Fix trivial breakage (typo, missing import) and re-run `run_trial.py` once **before** adjudicating the round, so the adjudicator sees the final attempt. If the idea itself is broken, let the crash row stand and move on.
+4. `gate_fail` rows are valuable: they map the boundary of the search space. Never merge one, however good its primary.
 
 ### Checking whether to stop
 
