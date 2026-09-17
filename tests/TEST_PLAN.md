@@ -78,6 +78,7 @@ Note the prompt does **not** mention tests. The skill has to introduce the count
 - `results-<run_tag>.tsv` has ~4 candidate rows per round sharing a round number
 - at most one `keep` per round
 - a crashed candidate produced a `crash` row and did not abort the round
+- every commit sha in `results-<run_tag>.tsv` is still reachable after the run (on the branch, or under `refs/autoloop/<run_tag>/`), and each kept row's sha is the sha on the branch (fast-forward, not a re-commit)
 - `check_stop.py` counted rounds, not rows: patience did not fire early
 - the 4 candidates within a round are substantively different ideas, not variations of one
 

@@ -401,6 +401,8 @@ check("adjudicate.py labels crash, gate_fail, discard and keep",
       and a1.get("keep_commit") == "eee5555", str(a1))
 check("adjudicate.py refuses a gate-violating winner",
       "gate_fail (tests_passed=10 fails >= 42)" in a1.get("rows", ["", ""])[1], str(a1.get("rows")))
+check("adjudicate.py marks an improvement that lost to a sibling as a live idea",
+      a1.get("rows", [""])[0].endswith("\tdiscard\tlost to 4: tighter loop"), str(a1.get("rows", [""])[0]))
 check("adjudicate.py rows have 7 tab-separated fields and no embedded tabs in descriptions",
       all(len(ln.split("\t")) == 7 for ln in a1.get("rows", [])), str(a1.get("rows")))
 append_rows(a1)
@@ -425,6 +427,29 @@ check("adjudicate.py applies min_delta_pct against best-so-far",
 v = stop_verdict(_cfgp, _results)
 check("check_stop.py accepts what adjudicate.py wrote with zero warnings",
       v.get("stop") is False and v.get("warnings") == [] and v.get("stats", {}).get("best") == 50.0, str(v))
+_before = len(io.open(_results, encoding="utf-8").read().splitlines())
+_cpath = os.path.join(_proj, "cands-append.json")
+with io.open(_cpath, "w", encoding="utf-8") as f:
+    f.write(json.dumps([
+        {"candidate": "0", "commit": "abc0004", "description": "a keep, appended by the script", "trial": dict(t_ok, primary=45.0)},
+        {"candidate": "1", "commit": "abc0005", "description": "lost by 0.2, inside the floor", "trial": dict(t_ok, primary=45.2)},
+    ]))
+r = subprocess.run([PY, os.path.join(ROOT, "scripts", "adjudicate.py"), "--config", _cfgp,
+                    "--results", _results, "--round", "4", "--candidates", _cpath, "--append"],
+                   capture_output=True, text=True)
+try:
+    a4 = json.loads(r.stdout.strip().splitlines()[-1])
+except Exception:
+    a4 = {"_stderr": r.stderr.strip()}
+_after = io.open(_results, encoding="utf-8").read().splitlines()
+check("adjudicate.py --append writes its rows into the results file",
+      a4.get("appended") == 2 and len(_after) == _before + 2 and _after[-2].endswith("\tkeep\ta keep, appended by the script"), str(a4))
+check("adjudicate.py flags a sibling that lost inside the noise floor",
+      _after[-1].endswith("\tdiscard\tlost to 0 inside the noise floor: lost by 0.2, inside the floor"), _after[-1])
+v = stop_verdict(_cfgp, _results)
+check("check_stop.py reads the appended round with zero warnings",
+      v.get("warnings") == [] and v.get("stats", {}).get("best") == 45.0 and v.get("stats", {}).get("rounds") == 4, str(v))
+check("SKILL.md uses adjudicate.py --append", "--candidates candidates.json --append" in _skill)
 _bad = os.path.join(_proj, "results-bad.tsv")
 with io.open(_bad, "w", encoding="utf-8", newline="\n") as f:
     f.write("round\tcandidate\tcommit\tprimary\tcounters\tstatus\tdescription\n")
