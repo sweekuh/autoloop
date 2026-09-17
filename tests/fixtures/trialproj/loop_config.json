@@ -21,7 +21,7 @@
   ],
   "candidates_per_round": 1,
   "worktree_isolation": false,
-  "trial_timeout_seconds": 1,
+  "trial_timeout_seconds": 3,
   "max_rounds": 40,
   "target": null,
   "patience": 8,

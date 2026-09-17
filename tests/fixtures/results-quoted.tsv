@@ -1,0 +1,5 @@
+round	candidate	commit	primary	counters	status	description
+0	0	aaaaaaa	100.0	tests_passed=42	keep	baseline
+1	0	bbbbbbb	99.0	tests_passed=42	discard	"quote opens here and never closes
+2	0	ccccccc	98.0	tests_passed=42	discard	still visible
+3	0	ddddddd	97.0	tests_passed=42	discard	still visible

@@ -28,6 +28,12 @@ floor the prefix says so ("lost to <id> inside the noise floor: "), because
 that ordering was a coin flip. The candidate generator should read those rows
 as live ideas.
 
+Candidate records come from the agent, so they are normalised before use: a
+missing or duplicated id is renamed, a non-dict record or trial is a crash, and
+a non-numeric or non-finite metric value is dropped (an unreadable primary is a
+crash; an unreadable gated counter is a gate_fail). Descriptions and counter
+names are stripped of anything that could corrupt the tab-separated log.
+
 Rules, applied in this order, with the same functions check_stop.py uses so
 the two scripts cannot disagree about what a keep is:
   1. A trial that timed out, crashed, or whose primary did not extract is
@@ -65,33 +71,55 @@ def ascii_only(s):
 
 
 def clean(text, limit=300):
-    """One line, no tabs or control characters, ASCII, bounded: the results file is tab-separated."""
+    """One line, no tabs, quotes or control characters, ASCII, bounded.
+
+    The results file is plain tab-separated text that check_stop.py reads with
+    no quoting, so a stray double quote (or a tab) in a description would
+    corrupt every row after it.
+    """
     s = " ".join(str(text if text is not None else "").split())
-    s = "".join(ch for ch in s if ch >= " " and ch != "\x7f")
+    s = "".join(ch for ch in s if ch >= " " and ch not in "\x7f\"")
     return ascii_only(s)[:limit] or "-"
 
 
-def finite_primary(trial):
+def number(v):
+    """A finite float from a trial field, or None. Never raises."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+        return None
+    return float(v)
+
+
+def finite_primary(trial):  # noqa: D401
     """The trial's primary as the value the results file will hold, or None.
 
     Rounded through fmt() so the comparison against best-so-far (which comes
     back from the file at that precision) uses the same number the row will
     carry. Non-finite values are None: nan and inf must never become a keep.
     """
-    p = trial.get("primary")
-    if isinstance(p, bool) or not isinstance(p, (int, float)) or not math.isfinite(p):
-        return None
-    return float(fmt(p))
+    p = number(trial.get("primary"))
+    return None if p is None else float(fmt(p))
 
 
 def fmt(v):
+    v = number(v)
     if v is None:
         return "-"
-    return f"{float(v):.10g}"
+    return f"{v:.10g}"
 
 
 def fmt_counters(counters):
-    items = [f"{k}={fmt(v)}" for k, v in sorted((counters or {}).items()) if v is not None]
+    """`name=value` pairs, with names normalised exactly as check_stop.py reads them.
+
+    Without clean_name a tab or a comma in a counter name would shift the TSV
+    columns or split one pair into two, and a gate would silently stop matching.
+    """
+    if not isinstance(counters, dict):
+        return "-"
+    items = []
+    for k, v in sorted(counters.items(), key=lambda kv: str(kv[0])):
+        val = number(v)
+        if val is not None:
+            items.append(f"{check_stop.clean_name(k)}={fmt(val)}")
     return ",".join(items) if items else "-"
 
 
@@ -101,7 +129,7 @@ def row(rnum, cand, status, description):
         str(rnum),
         clean(cand.get("candidate"), 40),
         clean(cand.get("commit"), 64),
-        fmt(trial.get("primary")),
+        fmt(trial.get("primary") if isinstance(trial, dict) else None),
         fmt_counters(trial.get("counters")),
         status,
         clean(description),
@@ -148,6 +176,15 @@ def run(args):
             cid = new_id
         cand["candidate"] = cid
         seen_ids.add(cid)
+        trial = cand["trial"]
+        # Metric values are the agent's too: a string or a non-dict counters
+        # map must make one candidate a crash, never abort the whole round.
+        if not isinstance(trial.get("counters"), dict):
+            trial["counters"] = {}
+        trial["counters"] = {k: number(v) for k, v in trial["counters"].items() if number(v) is not None}
+        if number(trial.get("primary")) is None:
+            trial["primary"] = None
+            trial["ok"] = False
     rules = check_stop.rules_from_config(cfg)
     direction = rules["direction"]
     if direction not in ("min", "max"):
@@ -178,9 +215,18 @@ def run(args):
     def finish():
         if args.append and out["rows"]:
             exists = os.path.exists(args.results) and os.path.getsize(args.results) > 0
+            needs_nl = False
+            if exists:
+                with open(args.results, "rb") as f:
+                    f.seek(-1, os.SEEK_END)
+                    # A file whose last line has no terminator would otherwise
+                    # swallow the first new row onto the end of it.
+                    needs_nl = f.read(1) not in (b"\n", b"\r")
             with open(args.results, "a", encoding="utf-8", newline="\n") as f:
                 if not exists:
                     f.write("\t".join(COLUMNS) + "\n")
+                elif needs_nl:
+                    f.write("\n")
                 for line in out["rows"]:
                     f.write(line + "\n")
             out["appended"] = len(out["rows"])

@@ -180,7 +180,8 @@ def render_block(ledger):
             f"| {r['rounds']} | {r['gate_fails']} | {r['stop']} |")
     lines += [
         "",
-        "Appended by `scripts/log_run.py --publish` (SKILL.md Phase 4). "
+        "Every run appends a row to the maintainer's local ledger at the end of Phase 4; "
+        "a maintainer publishes rows to this table with `scripts/log_run.py --publish`. "
         "Labels name the task shape, never the project; full trial logs stay in their "
         "source projects.",
     ]

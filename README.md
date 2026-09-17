@@ -19,7 +19,7 @@ Completed runs only: a task refused in Phase 0 or a baseline that crashed never 
 | 2026-07-25 | game level parity vs reference | `parity_passed` (max) | 23 -> 36 | +56.5% | 5 | 0 | primary hit its ceiling (36 of 36) |
 | 2026-07-28 | long-form guide quality | `judge_median` (max) (judged) | 66 -> 94 | +42.4% | 7 | 0 | ended at round 7 of 8 |
 
-Appended by `scripts/log_run.py --publish` (SKILL.md Phase 4). Labels name the task shape, never the project; full trial logs stay in their source projects.
+Every run appends a row to the maintainer's local ledger at the end of Phase 4; a maintainer publishes rows to this table with `scripts/log_run.py --publish`. Labels name the task shape, never the project; full trial logs stay in their source projects.
 <!-- autoloop-stats:end -->
 
 ## The part that makes it work

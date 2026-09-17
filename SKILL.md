@@ -161,6 +161,7 @@ Stopping rule, all active, checked in this order, whichever fires first. The use
 - **target**: stop when best-so-far reaches this value in the configured direction. Optional, default `null` (never fires). Set it whenever the primary has a known bound - a pass count, a recall, a percentage - because none of the other conditions can express "done": a run that maxes out its metric otherwise burns `patience` rounds proposing candidates that provably cannot improve.
 - **patience**: stop after this many consecutive rounds with no keep. Default 8.
 - **epsilon over epsilon_window**: stop when total improvement in best-so-far across the last `epsilon_window` rounds falls below `epsilon`, in metric units. Default window 10. Leave `epsilon` as `null` unless the user gives a number: `check_stop.py` then derives the larger of 0.5% of the baseline value and twice the noise floor at best-so-far, and reports it as `epsilon_effective`. A number you do set must be at least twice the noise floor, or a single floor-sized keep inside the window reads as progress and the condition never fires. `0` disables it.
+
 `target` is checked before `patience` so a finished run is not filed under the same stop reason as a stalled one. `max_rounds` is also enforced in candidate rows (`max_rounds x candidates_per_round`), so a log that reuses a round number still terminates.
 
 `trial_timeout_seconds` bounds one eval. `run_trial.py` kills a trial that exceeds it and the adjudicator files it as a `crash`, so a hung candidate costs one timeout, not the night.

@@ -304,6 +304,13 @@ with io.open(_bom, "w", encoding="utf-8-sig", newline="\n") as f:
 v = stop_verdict(os.path.join(FIXTURES, "loop_config.json"), _bom)
 check("check_stop.py tolerates a UTF-8 BOM in the results header",
       v.get("stats", {}).get("rounds") == 4 and v.get("warnings") == [], str(v))
+v = stop_verdict(os.path.join(FIXTURES, "loop_config.json"), os.path.join(FIXTURES, "results-quoted.tsv"))
+check("check_stop.py reads the log as plain TSV (a description opening with a quote hides nothing)",
+      v.get("stats", {}).get("rounds") == 4 and v.get("stats", {}).get("candidates") == 4, str(v))
+v = stop_verdict(os.path.join(FIXTURES, "loop_config-audit.json"), os.path.join(FIXTURES, "results-lowerbar.tsv"))
+check("check_stop.py lets a rejected keep raise the bar but never lower it",
+      v.get("stats", {}).get("best") == 100.0 and v.get("stats", {}).get("bar") == 50.0
+      and v.get("stats", {}).get("rounds_since_keep") == 2, str(v))
 
 # 10. epsilon: null means max(0.5% of baseline, 2x the noise floor at
 #     best-so-far), derived by check_stop.py. The template used to ship
@@ -421,14 +428,21 @@ def trial_with_extract(extract_cmd, **cfg_overrides):
         return {"_stderr": r.stderr.strip(), "_rc": r.returncode}
 
 
-_two = trial_with_extract(_pyq + " -c \"print('runtime_ms: 1'); print('runtime_ms: 2')\"")
+_emit = _pyq + " emit.py "
+_two = trial_with_extract(_emit + "two-lines")
 check("run_trial.py refuses an extract that prints two lines (an artifact printing its own metric line)",
       _two.get("primary") is None and _two.get("ok") is False, str(_two))
-_err = trial_with_extract(_pyq + " -c \"import sys; sys.stderr.write('error 42\\n'); sys.exit(1)\"")
+_twonum = trial_with_extract(_emit + "two-numbers")
+check("run_trial.py refuses an extract line holding two numbers (a number appended to the metric line)",
+      _twonum.get("primary") is None and _twonum.get("ok") is False, str(_twonum))
+_err = trial_with_extract(_emit + "stderr-fail")
 check("run_trial.py never scrapes digits from an extract's stderr or a failed extract",
       _err.get("primary") is None, str(_err))
-_inf = trial_with_extract(_pyq + " -c \"print('runtime_ms: 1e999')\"")
+_inf = trial_with_extract(_emit + "inf")
 check("run_trial.py treats a non-finite metric as unreadable", _inf.get("primary") is None, str(_inf))
+_lbl = trial_with_extract(_emit + "ok")
+check("run_trial.py reads a labelled metric line (the label's own digits do not count)",
+      _lbl.get("primary") == 7.5 and _lbl.get("ok") is True, str(_lbl))
 _nto = trial_with_extract(_cfg["primary"]["extract"], trial_timeout_seconds=None)
 check("run_trial.py falls back to a 600 s timeout when the config has none",
       _nto.get("ok") is True and any("using 600s" in ln for ln in _nto.get("tail", [])), str(_nto))
@@ -543,6 +557,27 @@ check("adjudicate.py answers garbage candidates with a JSON line, not a tracebac
 ag = adjudicate(_bogus, 6, ["not an object"])
 check("adjudicate.py files a malformed candidate record as a crash",
       [ln.split("\t")[5] for ln in ag.get("rows", [])] == ["crash"], str(ag))
+ag = adjudicate(_bogus, 7, [
+    {"candidate": "0", "commit": "s", "description": "string metrics", "trial": dict(t_ok, primary="fast")},
+    {"candidate": "1", "commit": "t", "description": "a real improvement", "trial": dict(t_ok, primary=90.0)},
+])
+check("adjudicate.py files a non-numeric metric as one crash without sinking the round",
+      [ln.split("\t")[5] for ln in ag.get("rows", [])] == ["crash", "keep"], str(ag))
+ai = adjudicate(_bogus, 8, [{"candidate": "0", "commit": "u", "description": "tabbed counter name",
+                             "trial": dict(t_ok, primary=80.0, counters={"tests\tpassed": 42, "tests_passed": 42})}])
+check("adjudicate.py normalises counter names so none can shift the TSV columns",
+      all(len(ln.split("\t")) == 7 for ln in ai.get("rows", []))
+      and "tests_passed=42" in ai.get("rows", [""])[0] and "\t" not in ai.get("rows", [""])[0].split("\t")[4], str(ai))
+_noeol = os.path.join(_proj, "results-noeol.tsv")
+with io.open(_noeol, "w", encoding="utf-8", newline="\n") as f:
+    f.write("round\tcandidate\tcommit\tprimary\tcounters\tstatus\tdescription\n"
+            "0\t0\t-\t100\ttests_passed=42\tkeep\tbaseline")  # no trailing newline
+r = subprocess.run([PY, os.path.join(ROOT, "scripts", "adjudicate.py"), "--config", _cfgp,
+                    "--results", _noeol, "--round", "1", "--candidates", _cpath, "--append"],
+                   capture_output=True, text=True)
+_lines = io.open(_noeol, encoding="utf-8").read().splitlines()
+check("adjudicate.py --append never concatenates a row onto an unterminated last line",
+      len(_lines) == 4 and _lines[1].endswith("baseline"), str(_lines))
 _bad = os.path.join(_proj, "results-bad.tsv")
 with io.open(_bad, "w", encoding="utf-8", newline="\n") as f:
     f.write("round\tcandidate\tcommit\tprimary\tcounters\tstatus\tdescription\n")
@@ -561,13 +596,23 @@ check("SKILL.md says the agent never writes a status label",
 #     tracked file makes update_check.py return behind-dirty, which silently
 #     disabled self-update for every user after their first logged run.
 _clone = os.path.join(tmpdir(), "skill")
-for _rel in subprocess.run(["git", "-C", ROOT, "ls-files", "-z"], capture_output=True).stdout.decode("utf-8").split("\0"):
-    _src = os.path.join(ROOT, _rel)
-    if not _rel or not os.path.isfile(_src):
-        continue
-    _dst = os.path.join(_clone, _rel)
-    os.makedirs(os.path.dirname(_dst), exist_ok=True)
-    shutil.copy2(_src, _dst)  # tracked files only: never a .venv or a worktree
+_ls = subprocess.run(["git", "-C", ROOT, "ls-files", "-z"], capture_output=True)
+_tracked = [p for p in _ls.stdout.decode("utf-8", "replace").split("\0") if p] if _ls.returncode == 0 else []
+if _tracked:  # tracked files only: never a .venv, a worktree, or a big runs/ export
+    for _rel in _tracked:
+        _src = os.path.join(ROOT, _rel)
+        if not os.path.isfile(_src):
+            continue
+        _dst = os.path.join(_clone, _rel)
+        os.makedirs(os.path.dirname(_dst), exist_ok=True)
+        shutil.copy2(_src, _dst)
+else:  # not a git checkout (a tarball install, or no git): copy what matters
+    for _rel in ("scripts", "runs", "README.md", "SKILL.md"):
+        _src = os.path.join(ROOT, _rel)
+        if os.path.isdir(_src):
+            shutil.copytree(_src, os.path.join(_clone, _rel), ignore=shutil.ignore_patterns("__pycache__", "local"))
+        elif os.path.isfile(_src):
+            shutil.copy2(_src, os.path.join(_clone, _rel))
 _git = ["git", "-C", _clone, "-c", "user.name=t", "-c", "user.email=t@t"]
 subprocess.run(_git + ["init", "-q"], capture_output=True)
 subprocess.run(_git + ["add", "-A"], capture_output=True)

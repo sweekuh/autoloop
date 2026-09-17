@@ -23,11 +23,12 @@ the harness instead of improving the metric:
     because an artifact that dies before writing its output would otherwise
     be scored on whatever the previous trial left behind. Report a failing
     test suite through a counter-metric, not through the exit code.
-  * An extract command must exit 0 and print exactly one non-empty line;
-    its stderr is discarded. Two lines means the pattern is ambiguous (or
-    the artifact printed a metric line of its own), and the value is null.
-  * The value is the last number on that line and must be finite; nan and
-    inf are null.
+  * An extract command must exit 0 and print exactly one non-empty line
+    holding exactly one number (after an optional `name:` label); its stderr
+    is discarded. Two lines, or two numbers on the line, means the pattern is
+    ambiguous - which is what an artifact printing a metric line of its own
+    looks like - and the value is null.
+  * The value must be finite; nan and inf are null.
   * `trial_timeout_seconds` missing, null, non-numeric or <= 0 falls back to
     600 seconds; there is no way to run unbounded. The whole process tree is
     killed on timeout, on Windows too.
@@ -56,6 +57,8 @@ TAIL_LINES = 20
 DEFAULT_TIMEOUT = 600.0
 EXTRACT_TIMEOUT = 60.0
 NUMBER = re.compile(r"[-+]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][-+]?\d+)?")
+LABEL = re.compile(r"^[A-Za-z_][A-Za-z0-9_.\-]*\s*[:=]\s*")
+TAIL_BYTES = 64 * 1024
 
 
 def ascii_only(s):
@@ -63,20 +66,24 @@ def ascii_only(s):
 
 
 def parse_metric(text):
-    """The last finite number on the single non-empty line of `text`, else None.
+    """The single finite number on the single non-empty line of `text`, else None.
 
-    More than one line is ambiguous: the frozen extract pattern is supposed to
-    select one metric line, and a second one is exactly what an artifact that
-    prints its own fake metric would produce.
+    Two ways an artifact games a benchmark are closed here. More than one line
+    is ambiguous, because the frozen extract pattern is supposed to select one
+    metric line and a second one is what a fake metric looks like. More than
+    one number on that line is ambiguous for the same reason: taking the last
+    would let `runtime_ms: 842.3 0.1` win. A leading `name:` or `name=` label
+    is stripped first, so `p95_ms: 12` reads as one number.
     """
     lines = [ln for ln in str(text).splitlines() if ln.strip()]
     if len(lines) != 1:
         return None
-    found = NUMBER.findall(lines[0])
-    if not found:
+    body = LABEL.sub("", lines[0].strip(), count=1)
+    found = NUMBER.findall(body)
+    if len(found) != 1:
         return None
     try:
-        val = float(found[-1])
+        val = float(found[0])
     except ValueError:
         return None
     if not math.isfinite(val):
@@ -149,13 +156,22 @@ def extract(cmd, cwd):
 
 
 def tail_of(output, cwd):
+    """The last few lines of the trial's output, bounded in every dimension.
+
+    A runaway candidate can print gigabytes, so only the last TAIL_BYTES of
+    run.log are read, and only when the command redirected its output there.
+    """
     lines = [ln.rstrip() for ln in output.splitlines() if ln.strip()]
     if not lines:
         log_path = os.path.join(cwd, "run.log")
-        if os.path.isfile(log_path):
+        if os.path.isfile(log_path) and not os.path.islink(log_path):
             try:
-                with open(log_path, encoding="utf-8", errors="replace") as f:
-                    lines = [ln.rstrip() for ln in f.read().splitlines() if ln.strip()]
+                with open(log_path, "rb") as f:
+                    size = os.fstat(f.fileno()).st_size
+                    if size > TAIL_BYTES:
+                        f.seek(-TAIL_BYTES, os.SEEK_END)
+                    raw = f.read().decode("utf-8", "replace")
+                lines = [ln.rstrip() for ln in raw.splitlines() if ln.strip()]
             except OSError:
                 lines = []
     return [ascii_only(ln)[:200] for ln in lines[-TAIL_LINES:]]
@@ -172,7 +188,7 @@ def timeout_from(cfg):
 
 
 def run(args):
-    with open(args.config, encoding="utf-8") as f:
+    with open(args.config, encoding="utf-8-sig") as f:
         cfg = json.load(f)
     cwd = os.path.abspath(args.cwd)
     eval_cmd = cfg.get("eval_command")

@@ -1,0 +1,5 @@
+round	candidate	commit	primary	counters	status	description
+0	0	aaaaaaa	100.0	tests_passed=42	keep	baseline
+1	0	bbbbbbb	50.0	tests_passed=42	keep	a real win
+1	1	ccccccc	99.0	tests_passed=42	keep	planted second keep invalidates the round
+2	0	ddddddd	98.0	tests_passed=42	keep	worse than the invalidated 50: must not count

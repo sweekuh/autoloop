@@ -33,7 +33,9 @@ condition.
 max_rounds and patience are evaluated even when no keep row has ever parsed,
 so a run that only crashes still terminates instead of looping unbounded.
 
-The results file is audited, not trusted. A `keep` row only counts as a keep
+The results file is audited, not trusted, and it is read as plain
+tab-separated text with no CSV quoting, so no description can swallow the
+rows after it. A `keep` row only counts as a keep
 when it has a parseable primary, is the only keep in its round, violates no
 declared counter-metric gate (the `counters` column is parsed as name=value
 pairs and checked against `counter_metrics`), and beats the previous valid best
@@ -41,6 +43,13 @@ by at least the noise floor (strictly better when the floor is 0). Anything
 else is listed in `warnings` and treated as no keep. That can only end a run
 earlier, never later: an unearned keep would otherwise reset patience and hide
 a stall. The baseline (the first valid keep) is exempt from the floor test.
+A rejected keep still raises the bar a later candidate has to beat, because
+dropping its value would make later rounds easier to keep - the one direction
+this audit must never move.
+
+Counter names are normalised the same way on both sides of the harness
+(anything but letters, digits, `_`, `.` and `-` becomes `_`), so a name that
+could not survive the `name=value` column can never make a gate unmatchable.
 
 The noise floor is the larger of `min_delta` (metric units) and
 `min_delta_pct` percent of the current best-so-far. The relative form exists
@@ -74,6 +83,20 @@ COMPARATORS = {
 }
 
 
+def open_results(path):
+    """The results file as a tab-separated reader with NO quoting semantics.
+
+    csv's default QUOTE_MINIMAL treats a leading double quote as opening a
+    quoted field, so one description starting with `"` would swallow every
+    later row and hide it from the audit. Nothing writes quotes here:
+    adjudicate.py strips them, and the columns are tab-separated.
+    """
+    # utf-8-sig: a BOM in the header would otherwise hide the `round` column
+    # and turn every candidate row into its own round.
+    f = open(path, newline="", encoding="utf-8-sig", errors="replace")
+    return f, csv.DictReader(f, delimiter="\t", quoting=csv.QUOTE_NONE)
+
+
 def parse_round(raw):
     """Round labels are integers, but tolerate integer-valued floats ('1.0').
 
@@ -84,6 +107,17 @@ def parse_round(raw):
     if not v.is_integer():
         raise ValueError(raw)
     return int(v)
+
+
+def clean_name(name):
+    """A counter name as it can survive the counters column.
+
+    The column is a `name=value` list split on commas, semicolons and
+    whitespace, so a name containing any of those (or an `=`) could not be
+    read back. Both sides of the harness normalise names the same way, so a
+    gate is never silently unmatchable.
+    """
+    return "".join(ch if (ch.isalnum() or ch in "_.-") else "_" for ch in str(name).strip())
 
 
 def parse_counters(raw):
@@ -100,9 +134,13 @@ def parse_counters(raw):
             continue
         name, _, val = tok.partition("=")
         try:
-            out[name.strip()] = float(val)
+            v = float(val)
         except ValueError:
             continue
+        if not math.isfinite(v):
+            # `tests_passed=inf` would otherwise satisfy any >= gate.
+            continue
+        out[clean_name(name)] = v
     return out
 
 
@@ -114,10 +152,13 @@ def load_gates(cfg):
     """
     gates = []
     for cm in cfg.get("counter_metrics") or []:
+        if not isinstance(cm, dict):
+            continue
         name = cm.get("name")
         thr = cm.get("threshold")
         if name is None or thr is None:
             continue
+        name = clean_name(name)
         cmp = cm.get("comparator")
         if cmp not in COMPARATORS:
             cmp = "<=" if cm.get("direction") == "min" else ">="
@@ -166,11 +207,23 @@ def floor_blocks_all(best, rules):
             and noise_floor(best, rules) >= best)
 
 
+def better(a, b, direction):
+    """The better of two values in `direction`, tolerating None."""
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return min(a, b) if direction == "min" else max(a, b)
+
+
 def _nonneg_float(v):
     try:
-        return max(0.0, float(v or 0.0))
+        f = float(v or 0.0)
     except (TypeError, ValueError):
         return 0.0
+    if not math.isfinite(f):
+        return 0.0
+    return max(0.0, f)
 
 
 def rules_from_config(cfg):
@@ -189,8 +242,8 @@ def load_rows(path, warnings=None):
     rows = []
     # utf-8-sig: a BOM in the header would otherwise hide the `round` column
     # and turn every candidate row into its own round.
-    with open(path, newline="", encoding="utf-8-sig", errors="replace") as f:
-        reader = csv.DictReader(f, delimiter="\t")
+    f, reader = open_results(path)
+    with f:
         has_round = reader.fieldnames is not None and "round" in reader.fieldnames
         # tolerate the older `metric` column name for the primary
         for i, r in enumerate(reader):
@@ -232,7 +285,8 @@ def group_rounds(rows, rules, warnings):
     for r in rows:
         buckets.setdefault(r["_round"], []).append(r)
     rounds = []
-    best = None
+    best = None   # best VALID keep: what the run is credited with
+    bar = None    # best keep row of any kind: the value a candidate must beat
     for rnum in sorted(buckets):
         members = buckets[rnum]
         kept = None
@@ -262,18 +316,20 @@ def group_rounds(rows, rules, warnings):
                 warnings.append(f"{label}: keep row has no value for gated counter(s) "
                                 f"{', '.join(missing)}; treated as no keep")
                 continue
-            if best is not None and not improves(m["_primary"], best, direction, noise_floor(best, rules)):
+            if bar is not None and not improves(
+                    m["_primary"], bar, direction, noise_floor(bar, rules)):
                 warnings.append(
                     f"{label}: keep row {m['_primary']:.6g} does not beat best-so-far "
-                    f"{best:.6g} by the noise floor {noise_floor(best, rules):.6g}; treated as no keep")
+                    f"{bar:.6g} by the noise floor {noise_floor(bar, rules):.6g}; treated as no keep")
                 continue
             kept = m["_primary"]
-            if best is None:
-                best = kept
-            elif direction == "min":
-                best = min(best, kept)
-            else:
-                best = max(best, kept)
+            best = better(best, kept, direction)
+        # A rejected keep still raises the bar for later rounds, never lowers
+        # it: dropping its value would let a planted row make later rounds
+        # easier to keep, the one direction this audit must never move.
+        for m in members:
+            if m["_status"] == "keep" and m["_primary"] is not None:
+                bar = better(bar, m["_primary"], direction)
         rounds.append({
             "round": rnum,
             "kept": kept,
@@ -331,11 +387,20 @@ def run(args):
                 "reason": "invalid config: primary.direction must be 'min' or 'max'",
                 "stats": {}, "warnings": warnings}
     patience = _setting(cfg, "patience", 8, warnings, int)
+    if patience < 1:
+        warnings.append(f"config: patience={patience} is below 1; using 1")
+        patience = 1
     epsilon = _setting(cfg, "epsilon", None, warnings, float, allow_none=True)
     window = _setting(cfg, "epsilon_window", 10, warnings, int)
+    if window < 1:
+        warnings.append(f"config: epsilon_window={window} is below 1; using 1")
+        window = 1
     if "max_rounds" not in cfg and "max_trials" in cfg:
         cfg = dict(cfg, max_rounds=cfg["max_trials"])
     max_rounds = _setting(cfg, "max_rounds", 40, warnings, int)
+    if max_rounds < 1:
+        warnings.append(f"config: max_rounds={max_rounds} is below 1; using 1")
+        max_rounds = 1
     per_round = max(1, _setting(cfg, "candidates_per_round", 1, warnings, int))
     target = _setting(cfg, "target", None, warnings, float, allow_none=True)
 
@@ -367,6 +432,12 @@ def run(args):
     }
     if target is not None:
         stats["target"] = target
+    bar = None
+    for r in rows:
+        if r["_status"] == "keep" and r["_primary"] is not None:
+            bar = better(bar, r["_primary"], direction)
+    if bar is not None and best is not None and bar != best:
+        stats["bar"] = bar
     floor = noise_floor(best, rules) if best is not None else rules["min_delta"]
     if floor:
         stats["noise_floor"] = floor
@@ -426,11 +497,12 @@ def main():
     args = p.parse_args()
     try:
         out = run(args)
+        line = json.dumps(out, allow_nan=False)
     except Exception as e:  # no verdict at all would leave the loop to decide for itself
-        out = {"stop": True,
-               "reason": f"check_stop.py failed: {type(e).__name__}: {e}"[:300],
-               "stats": {}, "warnings": []}
-    print(json.dumps(out, allow_nan=False))
+        line = json.dumps({"stop": True,
+                           "reason": f"check_stop.py failed: {type(e).__name__}: {e}"[:300],
+                           "stats": {}, "warnings": []})
+    print(line)
     return 0
 
 
