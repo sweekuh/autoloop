@@ -547,6 +547,81 @@ _bare = [ln for ln in _skill_lines if ln.strip().startswith(("python <", "python
 check("SKILL.md command lines use python3, never bare python",
       not _bare, str(_bare))
 
+# 15. toy-problems: the toy projects behind TEST_PLAN.md cases 1, 2, 4 and 7
+#    exist, run, and have a real plateau. A toy that the obvious fix solves
+#    in one round tests nothing, so the hasty fix (sortproj/naive_impl.py)
+#    must run yet fail a test, the checkproj baseline must be neither 0 nor
+#    10 of 10 with a clean lint, and the example configs must be ones
+#    check_stop.py accepts as-is.
+TOY = os.path.join(ROOT, "tests", "toy")
+
+
+def run_toy_bench(subdir, **extra_env):
+    env = dict(os.environ)
+    env["AUTOLOOP_TOY_N"] = "400"
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env.update(extra_env)
+    return subprocess.run([PY, "bench.py"], cwd=os.path.join(TOY, subdir),
+                          capture_output=True, text=True, env=env)
+
+
+def metric(stdout, name):
+    """The int after '^name: ' if exactly one such line exists, else None."""
+    found = re.findall(r"^" + name + r": ([0-9]+)$", stdout, re.M)
+    return int(found[0]) if len(found) == 1 else None
+
+
+r = run_toy_bench("sortproj")
+check("sortproj bench.py exits 0", r.returncode == 0, r.stderr.strip()[-300:])
+check("sortproj bench.py prints exactly one runtime_ms line",
+      len(re.findall(r"^runtime_ms: [0-9]+\.[0-9]$", r.stdout, re.M)) == 1, r.stdout[:300])
+_passed, _total = metric(r.stdout, "tests_passed"), metric(r.stdout, "tests_total")
+check("sortproj bench.py prints tests_passed and tests_total",
+      _passed is not None and _total is not None and _total > 0, r.stdout[:300])
+check("sortproj baseline passes every test",
+      _passed is not None and _passed == _total,
+      "\n".join(ln for ln in r.stdout.splitlines() if ln.startswith("FAIL"))[:600])
+
+r = run_toy_bench("sortproj", AUTOLOOP_TOY_IMPL="naive_impl")
+_passed, _total = metric(r.stdout, "tests_passed"), metric(r.stdout, "tests_total")
+check("sortproj plateau is real: the obvious fix breaks a test",
+      r.returncode == 0 and _passed is not None and _total is not None and _passed < _total,
+      f"passed={_passed} total={_total}")
+
+r = run_toy_bench("checkproj")
+check("checkproj bench.py exits 0", r.returncode == 0, r.stderr.strip()[-300:])
+_cp = metric(r.stdout, "checks_passed")
+check("checkproj baseline is partly broken (0 < checks_passed < 10)",
+      _cp is not None and 0 < _cp < 10, r.stdout[:300])
+check("checkproj bench.py prints checks_total: 10", metric(r.stdout, "checks_total") == 10)
+check("checkproj baseline is lint-clean (lint_errors: 0)",
+      metric(r.stdout, "lint_errors") == 0,
+      "\n".join(ln for ln in r.stdout.splitlines() if ln.startswith("LINT"))[:600])
+
+_empty = os.path.join(tempfile.mkdtemp(), "results-empty.tsv")
+with io.open(_empty, "w", encoding="utf-8", newline="\n") as f:
+    f.write("round\tcandidate\tcommit\tprimary\tcounters\tstatus\tdescription\n")
+for _sub in ("sortproj", "checkproj"):
+    _cfg_path = os.path.join(TOY, _sub, "loop_config.example.json")
+    try:
+        _cfg = json.loads(read("tests", "toy", _sub, "loop_config.example.json"))
+    except Exception as e:
+        _cfg = None
+        check(f"{_sub} loop_config.example.json parses", False, str(e))
+    else:
+        check(f"{_sub} loop_config.example.json parses",
+              bool(_cfg.get("mutable_paths") and _cfg.get("primary") and _cfg.get("counter_metrics")))
+    r = subprocess.run(
+        [PY, os.path.join(ROOT, "scripts", "check_stop.py"),
+         "--config", _cfg_path, "--results", _empty],
+        capture_output=True, text=True)
+    try:
+        v = json.loads(r.stdout.strip().splitlines()[-1])
+    except Exception:
+        v = {}
+    check(f"check_stop.py accepts {_sub} example config (empty run -> stop=false)",
+          r.returncode == 0 and v.get("stop") is False, (r.stderr.strip() or str(v))[-300:])
+
 print()
 if failures:
     print(f"{len(failures)} check(s) failed: " + ", ".join(failures))
