@@ -27,7 +27,6 @@ read as instructions.
 import argparse
 import json
 import os
-import shutil
 import subprocess
 import sys
 
@@ -39,8 +38,13 @@ DETAIL_MAX = 160
 
 # Non-interactive git: never pop a credential GUI, terminal, or askpass prompt.
 # If auth is needed and unavailable, fail fast so we fall through to fail-open.
+# GIT_DIR / GIT_WORK_TREE in the caller's environment would override the
+# `-C SKILL_DIR` that pins every call to this checkout, including the merge.
+_CLEAN_ENV = {k: v for k, v in os.environ.items()
+              if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
+                           "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES")}
 GIT_ENV = dict(
-    os.environ,
+    _CLEAN_ENV,
     GIT_TERMINAL_PROMPT="0",
     GCM_INTERACTIVE="Never",
     GIT_PAGER="cat",
@@ -49,10 +53,41 @@ GIT_ENV = dict(
     GIT_SSH_COMMAND="ssh -oBatchMode=yes",
 )
 
-# Absolute path resolved once. A bare "git" would let Windows CreateProcess
-# search the current directory first, and the skill runs with the cwd set to
-# whatever project is being optimized - a planted git.exe there must not win.
-GIT_BIN = shutil.which("git")
+def find_git():
+    """Absolute path of the git executable found on PATH, or None.
+
+    Deliberately not shutil.which(): before Python 3.12 it prepends the
+    current directory to the search on Windows (CPython 3.11's shutil.which
+    inserts os.curdir at the front of the PATH list), and the skill runs with
+    the cwd set to whatever project is being optimized - a git.exe planted
+    there must not win. So only absolute directories listed in PATH are
+    consulted, never the cwd: empty entries, ".", and any other relative entry
+    (which would resolve against the cwd) are skipped, and the names tried
+    are the bare "git" on POSIX, and on Windows only the PATHEXT names, since
+    os.access(X_OK) is true for any existing file there and an extensionless
+    `git` must not be picked.
+    """
+    names = ["git"]
+    if os.name == "nt":
+        # PATHEXT names only: os.access(X_OK) is true for any existing file on
+        # Windows, so an extensionless file called `git` must not be picked.
+        pathext = os.environ.get("PATHEXT", ".EXE;.CMD;.BAT;.COM")
+        names = ["git" + ext for ext in pathext.split(os.pathsep) if ext] or ["git.exe"]
+    for d in os.environ.get("PATH", "").split(os.pathsep):
+        if not d or not os.path.isabs(d):
+            continue
+        for name in names:
+            candidate = os.path.join(d, name)
+            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                return os.path.abspath(candidate)
+    return None
+
+
+# Absolute path resolved once, from PATH only. A bare "git" handed to
+# subprocess would let Windows CreateProcess search the current directory
+# first, and shutil.which() has the same cwd-first hole on Windows before
+# Python 3.12 - hence find_git(). None keeps the fail-open not-git verdict.
+GIT_BIN = find_git()
 
 
 def git(*args, timeout=20):

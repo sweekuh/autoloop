@@ -1,19 +1,19 @@
 {
-  "goal": "fixture: exercise check_stop.py without a live loop",
-  "run_tag": "fixture",
+  "goal": "fixture: exercise run_trial.py and adjudicate.py; tests/check.py substitutes the interpreter path into the commands",
+  "run_tag": "fixture-trial",
   "mutable_paths": [
-    "src/sorter.py"
+    "bench.py"
   ],
   "eval_command": "python3 bench.py > run.log 2>&1",
   "primary": {
     "name": "runtime_ms",
-    "extract": "grep '^runtime_ms:' run.log",
+    "extract": "python3 extract.py runtime_ms",
     "direction": "min"
   },
   "counter_metrics": [
     {
       "name": "tests_passed",
-      "extract": "grep '^tests_passed:' run.log",
+      "extract": "python3 extract.py tests_passed",
       "direction": "max",
       "threshold": 42,
       "comparator": ">="
@@ -21,14 +21,15 @@
   ],
   "candidates_per_round": 1,
   "worktree_isolation": false,
-  "trial_timeout_seconds": 600,
+  "trial_timeout_seconds": 3,
   "max_rounds": 40,
-  "patience": 2,
-  "epsilon": 0.001,
+  "target": null,
+  "patience": 8,
+  "epsilon": null,
   "epsilon_window": 10,
+  "min_delta": 0.5,
+  "min_delta_pct": 0.0,
   "judge_metric": false,
   "judge_panel_size": 3,
-  "judge_prompt_path": null,
-  "min_delta": 0.0,
-  "min_delta_pct": 0.0
+  "judge_prompt_path": null
 }

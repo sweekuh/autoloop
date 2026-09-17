@@ -1,0 +1,9 @@
+round	candidate	commit	primary	counters	status	description
+0	0	-	1319.3	tests_passed=42	keep	baseline
+1	1	3763497	491.4	tests_passed=42	keep	replace O(n^2) insertion sort with stable sorted() keyed on key
+2	2	f1cfabd	181	tests_passed=42	keep	dedupe: track seen idents in a set instead of a list
+3	3	f76c6f9	73.3	tests_passed=42	keep	format_records: append lines instead of quadratic out = out + [line]
+4	4	aab5434	18.3	tests_passed=42	discard	parse_line: precompile line regex at module level, drop redundant per-field revalidation and char loop
+5	5	a86c3c4	60.2	tests_passed=42	discard	sort: key=operator.attrgetter('key') instead of a Python lambda
+6	6	d8421d3	67.5	tests_passed=42	discard	format_records: list comprehension with enumerate and tab join
+7	7	deb9008	16.9	tests_passed=42	discard	explore: combine near-misses from rounds 4+5+6 (precompiled single-pass parse, attrgetter sort key, comprehension format)

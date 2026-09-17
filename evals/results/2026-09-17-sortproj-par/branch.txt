@@ -1,0 +1,7 @@
+e25bca9 cand 4-2: split-based parse_line (str.split + precompiled key regex + str checks)
+e5740ed cand 3-2: format_records appends one built string instead of out = out + [line]
+3515104 cand 2-1: dedupe with a set instead of a list membership scan
+b405b22 cand 1-1: stable built-in sorted() keyed on record.key instead of insertion sort
+0ee4912 autoloop e2e-par: ground min_delta at 10.0 ms (two baseline runs spread 8.9 ms)
+9d25ff2 autoloop e2e-par: setup contract
+a79158a sortproj baseline

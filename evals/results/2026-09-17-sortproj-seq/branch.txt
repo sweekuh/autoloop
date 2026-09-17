@@ -1,0 +1,6 @@
+f76c6f9 round 3: format_records: append lines instead of quadratic out = out + [line]
+f1cfabd round 2: dedupe: track seen idents in a set instead of a list
+3763497 round 1: replace O(n^2) insertion sort with stable sorted() keyed on key
+d9bd491 autoloop: ground min_delta at 90.0 ms (two baseline runs 1319.3 / 1403.1, spread 83.8)
+c6a92d5 autoloop: setup contract for run e2e-seq
+faf4039 sortproj baseline

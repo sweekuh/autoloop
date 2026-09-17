@@ -9,7 +9,9 @@ It generalizes [karpathy/autoresearch](https://github.com/karpathy/autoresearch)
 Aggregate stats from real runs, appended as they happen. Each row is one completed run; the trial-by-trial logs stay in their source projects.
 
 <!-- autoloop-stats:start -->
-3 run(s) logged - 14 kept, 2 discarded, 1 blocked by a counter-metric gate, 0 crashed. Median improvement in the primary metric: 56.5%.
+3 completed run(s) logged - 14 kept, 2 discarded, 1 blocked by a counter-metric gate, 0 crashed. Median improvement in the primary metric: 56.5%.
+
+Completed runs only: a task refused in Phase 0 or a baseline that crashed never produces a row, and a run the user interrupted is logged at its last round.
 
 | date | task | metric | baseline -> best | improvement | rounds | gate hits | stop |
 |---|---|---|---|---|---|---|---|
@@ -17,7 +19,7 @@ Aggregate stats from real runs, appended as they happen. Each row is one complet
 | 2026-07-25 | game level parity vs reference | `parity_passed` (max) | 23 -> 36 | +56.5% | 5 | 0 | primary hit its ceiling (36 of 36) |
 | 2026-07-28 | long-form guide quality | `judge_median` (max) (judged) | 66 -> 94 | +42.4% | 7 | 0 | ended at round 7 of 8 |
 
-Appended by `scripts/log_run.py` at the end of each run (SKILL.md Phase 4). Labels name the task shape, never the project; full trial logs stay in their source projects.
+Every run appends a row to the maintainer's local ledger at the end of Phase 4; a maintainer publishes rows to this table with `scripts/log_run.py --publish`. Labels name the task shape, never the project; full trial logs stay in their source projects.
 <!-- autoloop-stats:end -->
 
 ## The part that makes it work
@@ -41,7 +43,7 @@ Every run also declares a counter-metric: something the loop is forbidden to mak
 - **Phase 3, loop.** Each round proposes candidates, evaluates them with the frozen harness, keeps at most one, and logs all of them including the failures.
 - **Phase 4, report.** Baseline against best, the ordered list of kept commits so the win can be reproduced without rerunning the search, which gates blocked which candidates, and whether more search is worth paying for.
 
-`scripts/check_stop.py` decides when to stop and the loop obeys it. Four conditions, first to fire wins: target (best-so-far reaches a declared goal value, for a metric with a known bound), patience (N rounds with no keep), epsilon (gain across a trailing window drops below a threshold), and max_rounds. It lives in a separate script for the same reason the evaluator is frozen. Having just generated the ideas, the loop always feels one change away from a breakthrough.
+Three scripts make the decisions the loop is not allowed to make for itself. `scripts/run_trial.py` runs each trial under a timeout and extracts the numbers. `scripts/adjudicate.py` turns them into keep, discard, gate_fail, or crash, applying the counter-metric gates and the noise floor. `scripts/check_stop.py` decides when to stop: four conditions, checked in this order, first to fire wins: max_rounds (hard cap), target (best-so-far reaches a declared goal value, for a metric with a known bound), patience (N rounds with no keep), and epsilon (gain across a trailing window drops below a threshold; by default the larger of 0.5% of baseline and twice the noise floor). It also audits the log and refuses to count a keep that violates a gate or sits below the noise floor. They live in separate scripts for the same reason the evaluator is frozen. Having just generated the ideas, the loop always feels one change away from a breakthrough.
 
 One candidate per round is the default. Raise `candidates_per_round` above 1 and each candidate gets its own git worktree, which buys wall-clock time and costs sample efficiency, since candidates in the same round can't learn from each other's results.
 
@@ -49,11 +51,11 @@ One candidate per round is the default. Raise `candidates_per_round` above 1 and
 
 - [Claude Code](https://docs.claude.com/en/docs/claude-code)
 - `git`, because every trial is a commit and being able to revert is load-bearing
-- `python3`, for `check_stop.py` and the update check. No third-party packages.
+- `python3`, for the harness scripts and the update check. No third-party packages.
 
 ## Install
 
-Either method works. They differ only in how updates reach you.
+Either method works. They differ only in how updates reach you. Whichever you use, the skill needs its `scripts/` directory next to `SKILL.md`: a copy of `SKILL.md` on its own has no stopping rule, and the skill will refuse to run unattended without it.
 
 **With npx**, which also covers Cursor, Windsurf, Codex, and the other agents the `skills` CLI knows about:
 
@@ -83,6 +85,10 @@ An `npx skills add` install is a copy rather than a checkout, so there is nothin
 
 Worth understanding what that means: it pulls, then follows the updated instructions. Whoever can push to the repo you cloned from can change what this skill does on your machine, and there is no signature check. If you would rather approve updates yourself, pin the checkout with `git checkout <sha>`. A pinned or detached checkout reports `no-upstream` and is never moved. Local edits and diverged history are left alone too, and the check never blocks a run on its own: offline, no git, or any error, it says so in a line and continues.
 
+Logging a run at the end of Phase 4 writes to a gitignored file inside the checkout, so a finished run never leaves it dirty or blocks the next update.
+
+The skill's frontmatter pre-approves running its own `check_stop.py`, `adjudicate.py`, `log_run.py`, and `update_check.py`, so an update changes code that then runs without a permission prompt. `run_trial.py`, which executes your eval command, is deliberately not pre-approved. If that trade-off is not for you, pin the checkout.
+
 Update by hand any time:
 
 ```bash
@@ -93,14 +99,18 @@ git -C ~/.claude/skills/autoloop pull --ff-only
 
 ```
 SKILL.md                 the skill definition Claude Code loads
-scripts/check_stop.py    frozen stopping-rule arbiter
+scripts/run_trial.py     frozen: runs one trial under a timeout, extracts metrics
+scripts/adjudicate.py    frozen: keep / discard / gate_fail / crash for a round
+scripts/check_stop.py    frozen: stopping-rule arbiter, audits the log
 scripts/update_check.py  update check that runs before Phase 0
-scripts/log_run.py       appends an anonymized run summary to runs/RUNS.tsv
-runs/RUNS.tsv            the run ledger behind the Field results table
+scripts/log_run.py       appends an anonymized run summary to the ledger
+runs/RUNS.tsv            the published ledger behind the Field results table
 tests/check.py           mechanical checks, same ones CI runs
 tests/TEST_PLAN.md       cases for running the skill by hand
-tests/fixtures/          sample config and results for check_stop.py
+tests/fixtures/          sample configs, results, and a tiny trial project
+tests/toy/               toy projects with a real plateau for the test plan
 evals/evals.json         eval suite, skill-creator format
+evals/results/           recorded runs: trial logs, verdicts, and what the agent found awkward
 ```
 
 ## Contributing

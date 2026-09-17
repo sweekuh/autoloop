@@ -1,0 +1,1 @@
+{"stop": true, "reason": "max_rounds reached (8/8)", "stats": {"rounds": 8, "candidates": 22, "baseline": 1335.8, "best": 19.5, "rounds_since_keep": 3, "epsilon_effective": 6.679, "min_delta": 10.0}, "warnings": []}

@@ -1,9 +1,7 @@
 {
-  "goal": "fixture: exercise check_stop.py without a live loop",
-  "run_tag": "fixture",
-  "mutable_paths": [
-    "src/sorter.py"
-  ],
+  "goal": "Make sorter.process() faster as measured by bench.py runtime_ms, with the 42-test suite still fully passing",
+  "run_tag": "e2e-seq",
+  "mutable_paths": ["sorter.py"],
   "eval_command": "python3 bench.py > run.log 2>&1",
   "primary": {
     "name": "runtime_ms",
@@ -21,14 +19,14 @@
   ],
   "candidates_per_round": 1,
   "worktree_isolation": false,
-  "trial_timeout_seconds": 600,
-  "max_rounds": 40,
-  "patience": 2,
-  "epsilon": 0.001,
+  "trial_timeout_seconds": 120,
+  "max_rounds": 12,
+  "target": null,
+  "patience": 4,
+  "epsilon": null,
   "epsilon_window": 10,
+  "min_delta": 90.0,
   "judge_metric": false,
   "judge_panel_size": 3,
-  "judge_prompt_path": null,
-  "min_delta": 0.0,
-  "min_delta_pct": 0.0
+  "judge_prompt_path": null
 }

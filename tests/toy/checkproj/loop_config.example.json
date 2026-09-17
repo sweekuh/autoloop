@@ -1,0 +1,35 @@
+{
+  "goal": "Fix app.py until all 10 checks in bench.py pass, without introducing a lint error",
+  "run_tag": "checkproj",
+  "mutable_paths": [
+    "app.py"
+  ],
+  "eval_command": "python3 bench.py > run.log 2>&1",
+  "primary": {
+    "name": "checks_passed",
+    "extract": "grep '^checks_passed:' run.log",
+    "direction": "max"
+  },
+  "counter_metrics": [
+    {
+      "name": "lint_errors",
+      "extract": "grep '^lint_errors:' run.log",
+      "direction": "min",
+      "threshold": 0,
+      "comparator": "<="
+    }
+  ],
+  "candidates_per_round": 1,
+  "worktree_isolation": false,
+  "trial_timeout_seconds": 60,
+  "max_rounds": 10,
+  "target": 10,
+  "patience": 3,
+  "epsilon": null,
+  "epsilon_window": 10,
+  "min_delta": 0.0,
+  "min_delta_pct": 0.0,
+  "judge_metric": false,
+  "judge_panel_size": 3,
+  "judge_prompt_path": null
+}

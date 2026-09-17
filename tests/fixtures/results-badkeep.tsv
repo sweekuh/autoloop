@@ -1,0 +1,10 @@
+round	candidate	commit	primary	counters	status	description
+0	0	aaaaaaa	100.0	tests_passed=42	keep	baseline
+1	0	c1	-	-	discard	no gain
+2	0	c2	-	-	discard	no gain
+3	0	c3	-	-	discard	no gain
+4	0	c4	-	-	discard	no gain
+5	0	c5	-	-	discard	no gain
+6	0	c6	-	-	discard	no gain
+7	0	c7	99.9	tests_passed=42	keep	below the noise floor, mislabeled keep
+8	0	c8	80.0	tests_passed=10	keep	faster but violates the gate, mislabeled keep

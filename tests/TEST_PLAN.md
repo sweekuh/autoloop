@@ -2,7 +2,7 @@
 
 Run these in Claude Code, in a scratch git repo, with the skill installed. Each case targets one failure mode. The mechanical assertions are checkable by reading `results-<run_tag>.tsv`, `loop_config.json`, and `git log` after the run.
 
-Setup for cases 1 and 4 requires a toy problem with a **real plateau**, otherwise the loop terminates in one round and tests nothing. Build `bench.py` so the obvious fix helps and further gains need 2 or 3 nonobvious steps. Suggested shape: a hand-rolled O(n^2) sort over a fixed seeded input, `bench.py` printing `runtime_ms:` and `tests_passed:` where the test suite includes stability and edge cases that a naive `sorted()` swap would break.
+Setup for cases 1, 2 and 4 uses the ready-made toy in `tests/toy/sortproj` (`tests/toy/README.md` says how to copy it into a scratch repo; copy only the project directory, so the README's spoilers stay out of the agent's reach). It has a **real plateau**, which is the property that matters: a toy the obvious fix solves in one round terminates immediately and tests nothing. In `sortproj` the obvious fix (replacing the hand-rolled O(n^2) sort) helps, and further gains need 2 or 3 nonobvious steps, each guarded by tests that a naive rewrite breaks; `bench.py` prints `runtime_ms:`, `tests_passed:` and `tests_total:` over a fixed seeded input, and `tests/check.py` proves on every CI run that the hasty `sorted()` swap still fails a test. The numbers quoted in the prompts below are illustrative: read the real ones off your first `python3 bench.py` and say those (the test count really is 42).
 
 ---
 
@@ -13,8 +13,9 @@ Setup for cases 1 and 4 requires a toy problem with a **real plateau**, otherwis
 
 **Must hold**
 - `loop_config.json` contains mutable_paths, eval_command, primary with extract and direction, at least one counter_metric with a threshold, patience, max_rounds
-- the primary is wall-clock, so `min_delta` is nonzero, grounded in a repeated baseline eval (a 0 noise floor on a timing metric keeps luck)
+- the primary is wall-clock, so `min_delta_pct` is nonzero, grounded in a repeated baseline eval (a 0 noise floor on a timing metric keeps luck; an absolute `min_delta` stops working once the metric has shrunk past it)
 - `results-<run_tag>.tsv` header matches the documented 7 columns, round 0 is `keep` / `baseline`
+- every row was appended verbatim from `adjudicate.py` output and every trial ran through `run_trial.py`; the agent never wrote a status label by hand (`check_stop.py` reports zero `warnings` at the end)
 - at least 4 rounds beyond baseline
 - `results-<run_tag>.tsv` is untracked in git
 - commits on the `autoloop/*` branch equal the number of keep rows after baseline plus setup commits (baseline has no commit of its own)
@@ -77,6 +78,7 @@ Note the prompt does **not** mention tests. The skill has to introduce the count
 - `results-<run_tag>.tsv` has ~4 candidate rows per round sharing a round number
 - at most one `keep` per round
 - a crashed candidate produced a `crash` row and did not abort the round
+- every commit sha in `results-<run_tag>.tsv` is still reachable after the run (on the branch, or under `refs/autoloop/<run_tag>/`), and each kept row's sha is the sha on the branch (fast-forward, not a re-commit)
 - `check_stop.py` counted rounds, not rows: patience did not fire early
 - the 4 candidates within a round are substantively different ideas, not variations of one
 
@@ -111,7 +113,7 @@ Tests the update check baked into the skill (`scripts/update_check.py`, invoked 
 > Any autoloop invocation — e.g. the Case 1 sortproj prompt. The update check is the skill's first action regardless of the task.
 
 **Must hold**
-- before any Phase 0 qualification, the skill runs `python <skill_dir>/scripts/update_check.py` and reads its final JSON line
+- before any Phase 0 qualification, the skill runs `python3 ${CLAUDE_SKILL_DIR}/scripts/update_check.py` and reads its final JSON line
 - with the behind-but-clean setup, the verdict is `updated` / `fast-forwarded`, the checkout is fast-forwarded (`git rev-parse HEAD` equals `git rev-parse @{u}`), and the skill re-reads SKILL.md before continuing
 - run standalone in each state, the script's final JSON line is correct: up to date -> `up-to-date`; behind + clean -> `updated`; behind with an uncommitted change -> `behind-dirty`; a local commit not upstream -> `diverged`; detached HEAD or a branch with no tracking config -> `no-upstream` **and HEAD is unmoved** (a deliberate pin must survive); run from a copy whose parent has no `.git` -> `not-git` with exit 0; with `git` removed from PATH -> `not-git`; with the remote URL pointing at a nonexistent path -> `offline`
 - on `behind-dirty` and `diverged`, `update_check.py` changes nothing (HEAD unchanged, working tree untouched)
@@ -129,7 +131,7 @@ Tests the update check baked into the skill (`scripts/update_check.py`, invoked 
 A primary with a known ceiling (checks passed out of N, recall, a percentage) can finish rather than merely stall. Without `target`, none of the other stop conditions can say "done": the run keeps proposing until `patience` runs out, and every one of those rounds is provably incapable of a keep.
 
 **Setup**
-> A toy task whose primary is bounded and reachable, e.g. `bench.py` printing `checks_passed: 7` out of a fixed 10, where a handful of obvious edits get you to 10.
+> Use the ready-made toy in `tests/toy/checkproj`, copied into a scratch repo as `tests/toy/README.md` describes. Its `bench.py` prints `checks_passed: 6` out of a fixed `checks_total: 10` and `lint_errors: 0`: four of the ten functions in `app.py` have bugs findable by reading the checks, so a handful of correct edits reach 10, and the built-in lint (long lines, trailing whitespace, tabs, `print()` calls, unused imports) is what the counter-metric guards.
 
 **Prompt**
 > Use autoloop on ./checkproj. `python3 bench.py` prints `checks_passed: N` out of 10 and `lint_errors: N`. Maximize checks_passed, stop when it hits 10, lint_errors must stay 0.
