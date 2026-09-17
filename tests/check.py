@@ -423,6 +423,64 @@ check("log_run.py --publish updates the tracked ledger and README",
 check("SKILL.md Phase 4 logs to the local ledger", "runs/local/RUNS.tsv" in _skill)
 check(".gitignore excludes runs/local/", "runs/local/" in read(".gitignore"))
 
+# 13. windows-which: find_git() never consults the current directory. GIT_BIN
+#    used to come from shutil.which("git"), which on Windows under Python < 3.12
+#    prepends cwd to the search - and the skill runs with cwd set to the project
+#    being optimized, so a git.exe planted there would have won. Importing the
+#    module is safe: main() sits under the __name__ guard.
+import importlib.util
+_uc_spec = importlib.util.spec_from_file_location(
+    "autoloop_update_check", os.path.join(ROOT, "scripts", "update_check.py"))
+_uc = importlib.util.module_from_spec(_uc_spec)
+try:
+    _uc_spec.loader.exec_module(_uc)
+except Exception as e:
+    _uc = None
+    check("update_check.py imports as a module", False, str(e))
+else:
+    check("update_check.py imports as a module", True)
+    check("update_check.py defines find_git()", callable(getattr(_uc, "find_git", None)))
+    _uc_src = read("scripts", "update_check.py")
+    check("update_check.py binds GIT_BIN via find_git()", "GIT_BIN = find_git()" in _uc_src)
+    # The import line, not the call: the docstring legitimately names shutil.which
+    # in prose to explain why it is avoided, and no import means no call.
+    check("update_check.py no longer imports shutil", "import shutil" not in _uc_src)
+
+if _uc is not None and callable(getattr(_uc, "find_git", None)):
+    _base = tempfile.mkdtemp()
+    _cwd_dir = os.path.join(_base, "cwd_dir")      # holds a fake git, NOT on PATH
+    _path_dir = os.path.join(_base, "path_dir")    # holds a fake git, put on PATH
+    _empty_dir = os.path.join(_base, "empty_dir")  # a PATH with no git at all
+    for _d in (_cwd_dir, _path_dir, _empty_dir):
+        os.mkdir(_d)
+    for _d in (_cwd_dir, _path_dir):
+        for _name in ("git", "git.exe"):
+            _fake = os.path.join(_d, _name)
+            with io.open(_fake, "w", encoding="utf-8") as f:
+                f.write("#!/bin/sh\nexit 0\n")
+            os.chmod(_fake, 0o755)  # on Windows os.access(X_OK) is true for any existing file
+    _old_cwd = os.getcwd()
+    _old_path = os.environ.get("PATH")
+    try:
+        os.chdir(_cwd_dir)
+        os.environ["PATH"] = _empty_dir
+        _found = _uc.find_git()
+        check("find_git() ignores cwd when PATH has no git", _found is None, str(_found))
+        os.environ["PATH"] = _path_dir
+        _found = _uc.find_git()
+        check("find_git() finds git on PATH",
+              _found is not None and _found.startswith(_path_dir), str(_found))
+        os.environ["PATH"] = "." + os.pathsep + _path_dir
+        _found = _uc.find_git()
+        check("find_git() skips a '.' PATH entry ahead of the real one",
+              _found is not None and _found.startswith(_path_dir)
+              and not _found.startswith(_cwd_dir), str(_found))
+    finally:
+        os.chdir(_old_cwd)
+        if _old_path is None:
+            os.environ.pop("PATH", None)
+        else:
+            os.environ["PATH"] = _old_path
 
 print()
 if failures:
