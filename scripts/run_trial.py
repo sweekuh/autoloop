@@ -54,8 +54,32 @@ def last_number(text):
         return None
 
 
+def kill_tree(proc):
+    """Kill the shell and everything it started.
+
+    shell=True means `proc` is the shell; the eval is its child. On POSIX the
+    child sits in the session started below, so killing the process group gets
+    it. On Windows proc.kill() would stop only cmd.exe: the eval keeps running,
+    keeps run.log open, and every later trial fails with "file in use", which
+    is exactly what happened in CI. taskkill /T walks the tree.
+    """
+    if os.name == "nt":
+        try:
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
+            return
+        except (OSError, subprocess.SubprocessError):
+            pass
+        proc.kill()
+        return
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except OSError:
+        proc.kill()
+
+
 def run_shell(cmd, cwd, timeout):
-    """Run `cmd` through the shell; kill the whole process group on timeout.
+    """Run `cmd` through the shell; kill the whole process tree on timeout.
 
     Returns (exit_code|None, combined_output, timed_out).
     """
@@ -69,13 +93,7 @@ def run_shell(cmd, cwd, timeout):
         out, _ = proc.communicate(timeout=timeout)
         return proc.returncode, out.decode("utf-8", "replace"), False
     except subprocess.TimeoutExpired:
-        if os.name != "nt":
-            try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except OSError:
-                proc.kill()
-        else:
-            proc.kill()
+        kill_tree(proc)
         try:
             out, _ = proc.communicate(timeout=5)
         except subprocess.TimeoutExpired:
