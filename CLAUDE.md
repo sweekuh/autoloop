@@ -24,9 +24,9 @@ Only four files sit at the repo root, each for a reason: `README.md` (what users
 
 ## Commands
 
-There's no build step or package manifest — the executable code is `scripts/check_stop.py` and `scripts/update_check.py`.
+There's no build step or package manifest — the executable code is `scripts/check_stop.py`, `scripts/update_check.py`, and `scripts/log_run.py`.
 
-- Syntax-check them: `python3 -m py_compile scripts/check_stop.py scripts/update_check.py`
+- Syntax-check them: `python3 -m py_compile scripts/check_stop.py scripts/update_check.py scripts/log_run.py`
 - Run check_stop the way a live loop invokes it (a live run passes its own `--results results-<run_tag>.tsv`; here, point it at the fixtures): `python3 scripts/check_stop.py --config tests/fixtures/loop_config.json --results tests/fixtures/results.tsv` — prints a JSON verdict `{"stop": bool, "reason": str, "stats": {...}}` to stdout.
 - Run the update check the way SKILL.md invokes it (SKILL.md says `python`, matching its pre-existing `check_stop.py` line; use whichever name exists on your machine): `python3 scripts/update_check.py` (add `--check-only` to report without fast-forwarding) — prints a human line then a JSON verdict `{"status": ..., "action": ...}`. It derives its own skill dir from `__file__`, so it is path-independent across installs.
 - Validate the eval suite parses: `python3 -c "import json; json.load(open('evals/evals.json'))"`
@@ -43,17 +43,17 @@ There's no build step or package manifest — the executable code is `scripts/ch
 This is the load-bearing invariant of the whole skill (stated explicitly in the script's own docstring): the stop/continue decision has to be read-only ground truth the loop being evaluated cannot influence, or every run will report that it's still improving. Implementation details that matter if you touch this file:
 
 - It groups results-file rows by the `round` column, not raw candidate rows — with `candidates_per_round > 1` a round has several candidate rows but at most one `keep`, so counting raw rows would make `patience` fire once per candidate instead of once per round.
-- The three stop conditions are checked in this order, first to fire wins: `max_rounds` (hard cap) → `patience` (consecutive keepless rounds) → `epsilon`/`epsilon_window` (diminishing returns over the trailing window). Both hard caps are checked **before** the no-parseable-keep early return, so a run that only crashes (or whose primary column is malformed) still terminates instead of looping unbounded.
+- The four stop conditions are checked in this order, first to fire wins: `max_rounds` (hard cap) → `target` (best-so-far has reached the declared goal value; optional, `null` by default) → `patience` (consecutive keepless rounds) → `epsilon`/`epsilon_window` (diminishing returns over the trailing window). `target` sits before `patience` on purpose: once a bounded metric is at its goal, no further round can improve it, and a finished run must not be filed under the same stop reason as a stalled one. `max_rounds` and `patience` are also checked **before** the no-parseable-keep early return, so a run that only crashes (or whose primary column is malformed) still terminates instead of looping unbounded.
 - It's backward compatible on purpose: falls back to the legacy `metric` column name if `primary` is absent, and treats each row as its own round if the results file has no `round` column.
 
 ### Two eval listings that look redundant but aren't
 
-- `evals/evals.json` — the skill-creator-format automated suite: 5 evals, 0-indexed `id`s (0-4), each with a full `assertions` array (`mechanical`, `judgment`, or `manual` type). This is what an automated grading run consumes. It needs an LLM grading harness, so CI cannot run it; CI runs the mechanical checks instead (see `.github/workflows/checks.yml`).
-- `tests/TEST_PLAN.md` — 6 prose cases (`Case 1`-`Case 6`, 1-indexed) for a human running the skill manually in Claude Code, plus its own trailing "Machine-readable" JSON block — a different, lighter schema (no assertions) that indexes the 6 prose cases, not the same data as `evals/evals.json`.
+- `evals/evals.json` — the skill-creator-format automated suite: contiguous 0-indexed `id`s, each eval with a non-empty `assertions` array (`mechanical`, `judgment`, or `manual` type); `tests/check.py` enforces both. This is what an automated grading run consumes. It needs an LLM grading harness, so CI cannot run it; CI runs the mechanical checks instead (see `.github/workflows/checks.yml`).
+- `tests/TEST_PLAN.md` — 1-indexed prose cases (`Case 1`, `Case 2`, ...) for a human running the skill manually in Claude Code, plus its own trailing "Machine-readable" JSON block — a different, lighter schema (no assertions) that indexes the prose cases one-to-one, not the same data as `evals/evals.json`.
 
-The self-update feature is the one place the two listings deliberately mirror each other (`TEST_PLAN.md` Case 6 and `evals.json` id 4 cover the same states). Edit both when that behavior changes.
+Three behaviors are deliberately covered by both listings, one prose case mirroring one eval: self-update (`TEST_PLAN.md` Case 6 ↔ `evals.json` id 4), the counter-metric gate biting unprompted (Case 2 ↔ id 5), and a bounded primary reaching its `target` (Case 7 ↔ id 6). Edit both sides when one of those behaviors changes.
 
-`TEST_PLAN.md`'s Case 2 ("counter-metric gate must bite" — the skill must introduce a counter-metric unprompted) has no standalone counterpart in `evals/evals.json`; the closest thing is one assertion nested inside eval id 0. Don't assume the two files are 1:1 reconcilable, e.g. when running skill-creator's benchmarking workflow against this skill — Case 2 would need a new eval written first.
+The two files are still not 1:1, so don't assume they reconcile, e.g. when running skill-creator's benchmarking workflow against this skill: eval id 3 (parallel mode) is manual-only with no files, and Case 1 and Case 4 assert more than eval id 0 does (a nonzero `min_delta` grounded in a repeated baseline, worktree isolation, crash rows that don't sink a round). A case that exists in only one listing needs a new entry written before it can be run from the other.
 
 ### Toy problems for test cases 1 and 4 need a real plateau
 

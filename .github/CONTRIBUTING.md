@@ -27,7 +27,7 @@ One command runs everything CI runs:
 python3 tests/check.py
 ```
 
-It compiles both helpers, runs `check_stop.py` against the fixtures in `tests/fixtures/`, runs `update_check.py --check-only`, verifies both machine-readable listings parse and stay in sync with the prose cases, and guards the pure-ASCII output invariant. Exit code 0 means everything passed. CI runs exactly this on Linux, macOS, and Windows (`.github/workflows/checks.yml`).
+It compiles all three helpers (`check_stop.py`, `update_check.py`, `log_run.py`), runs `check_stop.py` against the fixtures in `tests/fixtures/`, runs `update_check.py --check-only`, runs `log_run.py --dry-run` against the same fixtures, verifies both machine-readable listings parse and stay in sync with the prose cases, and guards the pure-ASCII output invariant. Exit code 0 means everything passed. CI runs exactly this on Linux, macOS, and Windows (`.github/workflows/checks.yml`).
 
 To run a piece by hand:
 

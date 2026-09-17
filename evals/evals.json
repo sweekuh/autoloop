@@ -123,7 +123,7 @@
       "id": 3,
       "eval_name": "parallel-mode-claude-code-manual",
       "prompt": "In a Claude Code session on a repo with a benchmark script: 'Use autoloop with 4 parallel trials per round to optimize <artifact>. Patience 5 rounds.'",
-      "expected_output": "Manual checklist for Zach to verify in Claude Code",
+      "expected_output": "Manual checklist, verified by hand in Claude Code",
       "files": [],
       "runner": "manual-claude-code",
       "assertions": [
@@ -215,6 +215,78 @@
         },
         {
           "text": "On behind-dirty or diverged, the skill surfaces the printed fix command and asks before proceeding on a stale version instead of silently looping",
+          "type": "judgment"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "eval_name": "counter-metric-gate-bites",
+      "prompt": "I have a repo at /tmp/sortproj with slow_sort.py and bench.py. `python3 bench.py` prints `runtime_ms: 842.3` and `tests_passed: 42`. I want it aggressive: use autoloop to get runtime down as far as you can, 15 rounds, patience 6.",
+      "expected_output": "The prompt never mentions tests as a constraint, so the skill introduces a tests_passed counter-metric unprompted and confirms it before looping; baseline calibrates its threshold from the observed value; at least one gate_fail row is logged for a candidate that improved runtime while breaking tests; no gate_fail candidate is ever merged; the final report calls the gate failures out as findings",
+      "files": [
+        "/tmp/sortproj/slow_sort.py",
+        "/tmp/sortproj/bench.py"
+      ],
+      "assertions": [
+        {
+          "text": "A counter-metric was proposed by the skill without being asked, and confirmed with the user before the loop started",
+          "type": "judgment"
+        },
+        {
+          "text": "Baseline calibrated the counter-metric threshold from the observed baseline value (the threshold in loop_config.json matches the tests_passed the baseline round measured)",
+          "type": "mechanical"
+        },
+        {
+          "text": "results-<run_tag>.tsv contains at least one gate_fail row, meaning a candidate improved runtime_ms and was rejected for breaking tests",
+          "type": "mechanical"
+        },
+        {
+          "text": "No gate_fail candidate was ever merged: every commit on the autoloop branch after setup corresponds to a keep row",
+          "type": "mechanical"
+        },
+        {
+          "text": "The final report calls out the gate failures as findings",
+          "type": "judgment"
+        },
+        {
+          "text": "Would the run have shipped a broken sort without the gate? If no candidate ever tripped the gate, the toy problem is too easy and the case needs a harder plateau",
+          "type": "judgment"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "eval_name": "bounded-primary-target",
+      "prompt": "Use autoloop on /tmp/checkproj. `python3 bench.py` prints `checks_passed: N` out of 10 and `lint_errors: N`. Maximize checks_passed, stop when it hits 10, lint_errors must stay 0.",
+      "expected_output": "loop_config.json sets target 10 with primary.direction max; the run ends the round the primary first reaches 10, with check_stop.py reporting target reached and a target entry in stats; the Phase 4 report quotes that verdict as the stop reason; a config with no target key still stops only on patience / epsilon / max_rounds",
+      "files": [
+        "/tmp/checkproj/app.py",
+        "/tmp/checkproj/bench.py"
+      ],
+      "assertions": [
+        {
+          "text": "loop_config.json sets \"target\": 10 and primary.direction is max",
+          "type": "mechanical"
+        },
+        {
+          "text": "The run ends the round the primary first reaches 10, not patience rounds later",
+          "type": "mechanical"
+        },
+        {
+          "text": "check_stop.py's verdict reads target reached, and its stats include target",
+          "type": "mechanical"
+        },
+        {
+          "text": "The Phase 4 report quotes that verdict as the stop reason",
+          "type": "mechanical"
+        },
+        {
+          "text": "A config with no target key still behaves exactly as before (patience / epsilon / max_rounds only)",
+          "type": "mechanical"
+        },
+        {
+          "text": "The skill proposed a target during Phase 0 when the metric was obviously bounded, rather than waiting to be told",
           "type": "judgment"
         }
       ]
