@@ -9,10 +9,12 @@ docs' hard invariants (pure-ASCII output, frozen-harness wording) still hold.
 Run locally exactly as CI does:  python3 tests/check.py
 Exit code 0 = all checks passed.
 """
+import atexit
 import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -32,6 +34,19 @@ def check(name, ok, detail=""):
 def read(*parts):
     with io.open(os.path.join(ROOT, *parts), encoding="utf-8") as f:
         return f.read()
+
+
+_TMPDIRS = []
+
+
+def tmpdir():
+    """A temp directory that is removed when the checks exit (so CI and dev boxes don't accumulate them)."""
+    d = tempfile.mkdtemp(prefix="autoloop-check-")
+    _TMPDIRS.append(d)
+    return d
+
+
+atexit.register(lambda: [shutil.rmtree(d, ignore_errors=True) for d in _TMPDIRS])
 
 
 # 1. The helpers compile.
@@ -115,7 +130,7 @@ check("check_stop.py reports the target in stats",
 #     condition would silently change the verdict for every existing config.
 _cfg = json.loads(read("tests", "fixtures", "loop_config-target.json"))
 _cfg.pop("target")
-_tmp = os.path.join(tempfile.mkdtemp(), "loop_config.json")
+_tmp = os.path.join(tmpdir(), "loop_config.json")
 with io.open(_tmp, "w", encoding="utf-8") as f:
     f.write(json.dumps(_cfg))
 r = subprocess.run(
@@ -255,7 +270,7 @@ for cfg_name, res_name in (("loop_config.json", "results.tsv"),
     check(f"check_stop.py audit is silent on a clean log ({res_name})", v.get("warnings") == [], str(v))
 _cfg = json.loads(read("tests", "fixtures", "loop_config.json"))
 del _cfg["primary"]["direction"]
-_nodir = os.path.join(tempfile.mkdtemp(), "loop_config.json")
+_nodir = os.path.join(tmpdir(), "loop_config.json")
 with io.open(_nodir, "w", encoding="utf-8") as f:
     f.write(json.dumps(_cfg))
 v = stop_verdict(_nodir, os.path.join(FIXTURES, "results.tsv"))
@@ -272,7 +287,7 @@ check("check_stop.py derives epsilon from baseline when null",
       and abs(v.get("stats", {}).get("epsilon_effective", 0) - 4.21) < 1e-9, str(v))
 _cfg = json.loads(read("tests", "fixtures", "loop_config-epsilon.json"))
 _cfg["epsilon"] = 0.001
-_eps = os.path.join(tempfile.mkdtemp(), "loop_config.json")
+_eps = os.path.join(tmpdir(), "loop_config.json")
 with io.open(_eps, "w", encoding="utf-8") as f:
     f.write(json.dumps(_cfg))
 v = stop_verdict(_eps, os.path.join(FIXTURES, "results-epsilon.tsv"))
@@ -284,8 +299,7 @@ check("SKILL.md template ships epsilon null", '"epsilon": null' in _skill)
 #     decision comes out of the frozen scripts, on a tiny fixture project. The
 #     interpreter path is substituted into the commands so the fixture runs on
 #     Windows too (no grep, no python3 alias).
-import shutil
-_proj = os.path.join(tempfile.mkdtemp(), "proj")
+_proj = os.path.join(tmpdir(), "proj")
 shutil.copytree(os.path.join(FIXTURES, "trialproj"), _proj)
 _cfg = json.loads(read("tests", "fixtures", "trialproj", "loop_config.json"))
 _pyq = '"' + PY + '"'
@@ -393,7 +407,7 @@ check("SKILL.md says the agent never writes a status label",
 # 12. log_run.py must not dirty the skill checkout by default. A modified
 #     tracked file makes update_check.py return behind-dirty, which silently
 #     disabled self-update for every user after their first logged run.
-_clone = os.path.join(tempfile.mkdtemp(), "skill")
+_clone = os.path.join(tmpdir(), "skill")
 shutil.copytree(ROOT, _clone, ignore=shutil.ignore_patterns(".git", "__pycache__", "local", ".claude"))
 _git = ["git", "-C", _clone, "-c", "user.name=t", "-c", "user.email=t@t"]
 subprocess.run(_git + ["init", "-q"], capture_output=True)
@@ -448,7 +462,7 @@ else:
           re.search(r"^\s*(import shutil|from shutil import)", _uc_src, re.M) is None)
 
 if _uc is not None and callable(getattr(_uc, "find_git", None)):
-    _base = tempfile.mkdtemp()
+    _base = tmpdir()
     _cwd_dir = os.path.join(_base, "cwd_dir")      # holds a fake git, NOT on PATH
     _path_dir = os.path.join(_base, "path_dir")    # holds a fake git, put on PATH
     _empty_dir = os.path.join(_base, "empty_dir")  # a PATH with no git at all
@@ -599,7 +613,7 @@ check("checkproj baseline is lint-clean (lint_errors: 0)",
       metric(r.stdout, "lint_errors") == 0,
       "\n".join(ln for ln in r.stdout.splitlines() if ln.startswith("LINT"))[:600])
 
-_empty = os.path.join(tempfile.mkdtemp(), "results-empty.tsv")
+_empty = os.path.join(tmpdir(), "results-empty.tsv")
 with io.open(_empty, "w", encoding="utf-8", newline="\n") as f:
     f.write("round\tcandidate\tcommit\tprimary\tcounters\tstatus\tdescription\n")
 for _sub in ("sortproj", "checkproj"):
