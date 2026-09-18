@@ -50,13 +50,41 @@ def tmpdir():
 atexit.register(lambda: [shutil.rmtree(d, ignore_errors=True) for d in _TMPDIRS])
 
 
+def pycache_dirs():
+    """Every __pycache__ inside the checkout, so the checks can prove they add none."""
+    found = set()
+    for base, dirs, _ in os.walk(ROOT):
+        if ".git" in base:
+            continue
+        for d in dirs:
+            if d == "__pycache__":
+                found.add(os.path.join(base, d))
+    return found
+
+
+_PYCACHE_BEFORE = pycache_dirs()
+
+
 # 1. The helpers compile.
 SCRIPTS = ("scripts/check_stop.py", "scripts/run_trial.py", "scripts/adjudicate.py",
            "scripts/update_check.py", "scripts/log_run.py")
+_PYC = tmpdir()
 for script in SCRIPTS:
-    r = subprocess.run([PY, "-m", "py_compile", os.path.join(ROOT, script)],
-                       capture_output=True, text=True)
+    # Compile to a throwaway cfile: `python -m py_compile` writes
+    # scripts/__pycache__ into the checkout, and an untracked file there is
+    # what makes update_check.py report behind-dirty.
+    r = subprocess.run(
+        [PY, "-c",
+         "import py_compile,sys; py_compile.compile(sys.argv[1], cfile=sys.argv[2], doraise=True)",
+         os.path.join(ROOT, script), os.path.join(_PYC, os.path.basename(script) + "c")],
+        capture_output=True, text=True)
     check(f"compiles: {script}", r.returncode == 0, r.stderr.strip())
+# The checks run the scripts many times over; they should not litter the
+# checkout doing it. (.gitignore covers __pycache__, so this is tidiness, not
+# a self-update hazard.) Pre-existing directories are the contributor's, not
+# ours, so only newly created ones fail.
+check("the checks create no new __pycache__ in the checkout",
+      not (pycache_dirs() - _PYCACHE_BEFORE), str(sorted(pycache_dirs() - _PYCACHE_BEFORE))[:200])
 
 # 2. check_stop.py runs against fixtures and returns a well-formed verdict.
 r = subprocess.run(
@@ -300,10 +328,13 @@ check("check_stop.py answers a non-numeric config value with a verdict and a war
       "_stderr" not in v and isinstance(v.get("stop"), bool) and any("patience" in w for w in v.get("warnings", [])), str(v))
 _bom = os.path.join(tmpdir(), "results-bom.tsv")
 with io.open(_bom, "w", encoding="utf-8-sig", newline="\n") as f:
-    f.write(read("tests", "fixtures", "results.tsv"))
+    # 3 rows across 2 rounds: if the BOM hid the `round` column, each row would
+    # be its own round and this would read 3, so the check can actually fail.
+    f.write(read("tests", "fixtures", "results-floatrounds.tsv"))
 v = stop_verdict(os.path.join(FIXTURES, "loop_config.json"), _bom)
 check("check_stop.py tolerates a UTF-8 BOM in the results header",
-      v.get("stats", {}).get("rounds") == 4 and v.get("warnings") == [], str(v))
+      v.get("stats", {}).get("rounds") == 2 and v.get("stats", {}).get("candidates") == 3
+      and v.get("warnings") == [], str(v))
 v = stop_verdict(os.path.join(FIXTURES, "loop_config.json"), os.path.join(FIXTURES, "results-quoted.tsv"))
 check("check_stop.py reads the log as plain TSV (a description opening with a quote hides nothing)",
       v.get("stats", {}).get("rounds") == 4 and v.get("stats", {}).get("candidates") == 4, str(v))
@@ -395,7 +426,10 @@ t_ok = run_trial("ok")
 check("run_trial.py extracts the primary and the counter",
       t_ok.get("ok") is True and t_ok.get("primary") == 123.4
       and t_ok.get("counters", {}).get("tests_passed") == 42.0, str(t_ok))
-check("run_trial.py output is pure ASCII", all(ord(c) < 128 for c in json.dumps(t_ok)))
+_raw = subprocess.run([PY, os.path.join(ROOT, "scripts", "run_trial.py"), "--config", _cfgp, "--cwd", _proj],
+                      capture_output=True, env=dict(os.environ, AUTOLOOP_FIXTURE_MODE="crash")).stdout
+check("run_trial.py output is pure ASCII even when the eval prints non-ASCII",
+      _raw and max(_raw) < 128, repr(_raw[:200]))
 t_to = run_trial("sleep")
 check("run_trial.py enforces trial_timeout_seconds",
       t_to.get("ok") is False and t_to.get("timed_out") is True and t_to.get("elapsed_s", 99) < 30, str(t_to))
@@ -431,15 +465,42 @@ def trial_with_extract(extract_cmd, **cfg_overrides):
 _emit = _pyq + " emit.py "
 _two = trial_with_extract(_emit + "two-lines")
 check("run_trial.py refuses an extract that prints two lines (an artifact printing its own metric line)",
-      _two.get("primary") is None and _two.get("ok") is False, str(_two))
+      "ok" in _two and _two.get("primary") is None and _two.get("ok") is False, str(_two))
 _twonum = trial_with_extract(_emit + "two-numbers")
 check("run_trial.py refuses an extract line holding two numbers (a number appended to the metric line)",
       _twonum.get("primary") is None and _twonum.get("ok") is False, str(_twonum))
 _err = trial_with_extract(_emit + "stderr-fail")
-check("run_trial.py never scrapes digits from an extract's stderr or a failed extract",
-      _err.get("primary") is None, str(_err))
+check("run_trial.py reads nothing from an extract that exited non-zero",
+      "ok" in _err and _err.get("primary") is None, str(_err))
+_serr = trial_with_extract(_emit + "stderr-ok")
+check("run_trial.py drops an extract's stderr and reads only its stdout",
+      _serr.get("primary") == 3.5 and _serr.get("ok") is True, str(_serr))
 _inf = trial_with_extract(_emit + "inf")
-check("run_trial.py treats a non-finite metric as unreadable", _inf.get("primary") is None, str(_inf))
+check("run_trial.py treats a non-finite metric as unreadable",
+      "ok" in _inf and _inf.get("primary") is None, str(_inf))
+_flood = run_trial("flood")
+check("run_trial.py bounds a runaway log: the metric still reads and the tail stays short",
+      _flood.get("ok") is True and _flood.get("primary") == 123.4
+      and len(_flood.get("tail", [])) <= 20
+      and sum(len(ln) for ln in _flood.get("tail", [])) < 20 * 210, str(_flood)[:300])
+_stale = os.path.join(_proj, "stale")
+os.makedirs(_stale, exist_ok=True)
+with io.open(os.path.join(_stale, "run.log"), "w", encoding="utf-8") as f:
+    f.write("output of some OTHER trial\n")
+os.utime(os.path.join(_stale, "run.log"), (1_000_000, 1_000_000))
+_cfg_stale = dict(_cfg, eval_command=_pyq + " -c \"pass\"")
+_p_stale = os.path.join(_proj, "loop_config-stale.json")
+with io.open(_p_stale, "w", encoding="utf-8") as f:
+    f.write(json.dumps(_cfg_stale))
+r = subprocess.run([PY, os.path.join(ROOT, "scripts", "run_trial.py"), "--config", _p_stale, "--cwd", _stale],
+                   capture_output=True, text=True)
+try:
+    _sv = json.loads(r.stdout.strip().splitlines()[-1])
+except Exception:
+    _sv = {"_stderr": r.stderr.strip()}
+check("run_trial.py never shows a previous trial's run.log as this trial's tail",
+      "ok" in _sv and not any("OTHER trial" in ln for ln in _sv.get("tail", [])), str(_sv)[:300])
+
 _lbl = trial_with_extract(_emit + "ok")
 check("run_trial.py reads a labelled metric line (the label's own digits do not count)",
       _lbl.get("primary") == 7.5 and _lbl.get("ok") is True, str(_lbl))
@@ -621,7 +682,7 @@ if _tracked:  # tracked files only: never a .venv, a worktree, or a big runs/ ex
         os.makedirs(os.path.dirname(_dst), exist_ok=True)
         shutil.copy2(_src, _dst)
 else:  # not a git checkout (a tarball install, or no git): copy what matters
-    for _rel in ("scripts", "runs", "README.md", "SKILL.md"):
+    for _rel in ("scripts", "runs", "README.md", "SKILL.md", ".gitignore"):
         _src = os.path.join(ROOT, _rel)
         if os.path.isdir(_src):
             shutil.copytree(_src, os.path.join(_clone, _rel), ignore=shutil.ignore_patterns("__pycache__", "local"))
@@ -654,6 +715,23 @@ check("log_run.py --publish updates the tracked ledger and README",
       r.returncode == 0 and "README.md" in _porcelain and "runs/RUNS.tsv" in _porcelain, _porcelain or r.stderr)
 check("SKILL.md Phase 4 logs to the local ledger", "runs/local/RUNS.tsv" in _skill)
 check(".gitignore excludes runs/local/", "runs/local/" in read(".gitignore"))
+with io.open(_local, "rb") as f:
+    _ledger_bytes = f.read()
+check("log_run.py writes LF rows on every platform",
+      b"\r\n" not in _ledger_bytes and _ledger_bytes.endswith(b"\n"), repr(_ledger_bytes[-60:]))
+_crlf = []
+for _base, _dirs, _files in os.walk(ROOT):
+    if ".git" in _base or "__pycache__" in _base:
+        continue
+    for _f in _files:
+        if os.path.splitext(_f)[1] in (".py", ".md", ".json", ".tsv", ".yml", ".sh"):
+            if os.path.join("runs", "local") in os.path.relpath(_base, ROOT):
+                continue  # the per-user local ledger is gitignored, not part of the package
+            _p = os.path.join(_base, _f)
+            with io.open(_p, "rb") as fh:
+                if b"\r\n" in fh.read():
+                    _crlf.append(os.path.relpath(_p, ROOT))
+check("every text file in the package uses LF endings", not _crlf, str(_crlf)[:300])
 
 # 13. windows-which: find_git() never consults the current directory. GIT_BIN
 #    used to come from shutil.which("git"), which on Windows under Python < 3.12
@@ -708,6 +786,34 @@ if _uc is not None and callable(getattr(_uc, "find_git", None)):
         check("find_git() skips a '.' PATH entry ahead of the real one",
               _found is not None and _found.startswith(_path_dir)
               and not _found.startswith(_cwd_dir), str(_found))
+        # The Windows branch, exercised on every platform: os.access(X_OK) is
+        # true for any existing file there, so find_git() must try only the
+        # PATHEXT names. An extensionless `git` sitting in a PATH directory
+        # must not win over git.bat.
+        _win_dir = os.path.join(_base, "win_dir")
+        os.mkdir(_win_dir)
+        for _name in ("git", "git.bat"):
+            _fake = os.path.join(_win_dir, _name)
+            with io.open(_fake, "w", encoding="utf-8") as f:
+                f.write("@echo off\n")
+            os.chmod(_fake, 0o755)
+        _old_name, _old_sep, _old_ext = os.name, os.pathsep, os.environ.get("PATHEXT")
+        try:
+            _uc.os.name = "nt"
+            # Lowercase, because Windows' own filesystem is case-insensitive
+            # and this one is not; the property under test is that only
+            # PATHEXT names are tried, never the extensionless `git`.
+            os.environ["PATHEXT"] = ".bat;.exe"
+            os.environ["PATH"] = _win_dir
+            _found = _uc.find_git()
+            check("find_git() tries only PATHEXT names on Windows",
+                  _found is not None and _found.lower().endswith(".bat"), str(_found))
+        finally:
+            _uc.os.name = _old_name
+            if _old_ext is None:
+                os.environ.pop("PATHEXT", None)
+            else:
+                os.environ["PATHEXT"] = _old_ext
     finally:
         os.chdir(_old_cwd)
         if _old_path is None:
@@ -722,13 +828,21 @@ if _uc is not None and callable(getattr(_uc, "find_git", None)):
 #    in the field: no scripts/ dir means no frozen stopping rule at all).
 _skill = read("SKILL.md")
 _skill_lines = _skill.splitlines()
+# The body only: the allowed-tools frontmatter line names every script, so
+# matching against the whole file would let a body invocation regress to a
+# relative path with these guards still green.
+_fence_idx = [i for i, ln in enumerate(_skill_lines) if ln.strip() == "---"][:2]
+_skill_body = "\n".join(_skill_lines[_fence_idx[1] + 1:]) if len(_fence_idx) == 2 else _skill
 check("SKILL.md has no <skill_dir> placeholder left",
       "<skill_dir>" not in _skill)
 for _name in ("update_check.py", "check_stop.py", "log_run.py"):
     check(f"SKILL.md invokes {_name} as python3 ${{CLAUDE_SKILL_DIR}}/scripts/{_name}",
-          "python3 ${CLAUDE_SKILL_DIR}/scripts/" + _name in _skill)
+          "python3 ${CLAUDE_SKILL_DIR}/scripts/" + _name in _skill_body)
 check("SKILL.md addresses check_stop.py via ${CLAUDE_SKILL_DIR}",
-      "${CLAUDE_SKILL_DIR}/scripts/check_stop.py" in _skill)
+      "${CLAUDE_SKILL_DIR}/scripts/check_stop.py" in _skill_body)
+check("SKILL.md body invokes run_trial.py and adjudicate.py the same way",
+      all("python3 ${CLAUDE_SKILL_DIR}/scripts/" + n in _skill_body
+          for n in ("run_trial.py", "adjudicate.py")))
 
 # Frontmatter = the lines between the first two "---" lines. Plain string
 # handling on purpose: this file stays stdlib-only, so no yaml module.
@@ -852,8 +966,14 @@ with io.open(os.path.join(_cp_copy, "app.py"), "a", encoding="utf-8") as f:
     f.write("\nprint('lint bait')   \n")
 r = subprocess.run([PY, "bench.py"], cwd=_cp_copy, capture_output=True, text=True,
                    env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
-check("checkproj lint actually bites (a planted print and trailing whitespace are counted)",
-      r.returncode == 0 and (metric(r.stdout, "lint_errors") or 0) >= 1, r.stdout[:300])
+_lint = r.stdout
+check("checkproj lint counts both a planted print and trailing whitespace",
+      r.returncode == 0 and (metric(_lint, "lint_errors") or 0) >= 2, _lint[:400])
+check("checkproj lint names each rule it fired",
+      any("print" in ln.lower() for ln in _lint.splitlines() if ln.startswith("LINT"))
+      and any("whitespace" in ln.lower() or "trailing" in ln.lower()
+              for ln in _lint.splitlines() if ln.startswith("LINT")),
+      "\n".join(ln for ln in _lint.splitlines() if ln.startswith("LINT"))[:400])
 
 _empty = os.path.join(tmpdir(), "results-empty.tsv")
 with io.open(_empty, "w", encoding="utf-8", newline="\n") as f:

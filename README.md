@@ -38,7 +38,7 @@ Every run also declares a counter-metric: something the loop is forbidden to mak
 ## How a run goes
 
 - **Phase 0, qualify.** Goal, mutable paths, eval command, primary metric, counter-metrics, budget. This is where it refuses if the task doesn't fit.
-- **Phase 1, contract.** Writes `loop_config.json`, creates the `autoloop/<run_tag>` branch and `results-<run_tag>.tsv`, waits for your sign-off.
+- **Phase 1, contract.** Proposes `loop_config.json` and waits for your sign-off, then commits it and creates the `autoloop/<run_tag>` branch and `results-<run_tag>.tsv`.
 - **Phase 2, baseline.** Evaluates the artifact untouched, and calibrates the counter-metric thresholds against what it measures.
 - **Phase 3, loop.** Each round proposes candidates, evaluates them with the frozen harness, keeps at most one, and logs all of them including the failures.
 - **Phase 4, report.** Baseline against best, the ordered list of kept commits so the win can be reproduced without rerunning the search, which gates blocked which candidates, and whether more search is worth paying for.

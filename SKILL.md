@@ -15,7 +15,7 @@ description: >-
   when the user never says "loop" or "autoloop".
 allowed-tools: Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/check_stop.py *), Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/adjudicate.py *), Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/log_run.py *), Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/update_check.py *), Bash(python ${CLAUDE_SKILL_DIR}/scripts/check_stop.py *), Bash(python ${CLAUDE_SKILL_DIR}/scripts/adjudicate.py *), Bash(python ${CLAUDE_SKILL_DIR}/scripts/log_run.py *), Bash(python ${CLAUDE_SKILL_DIR}/scripts/update_check.py *)
 metadata:
-  version: 0.2.0
+  version: 0.3.0
 ---
 
 # Autoloop

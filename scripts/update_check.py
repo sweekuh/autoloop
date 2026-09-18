@@ -71,8 +71,10 @@ def find_git():
     if os.name == "nt":
         # PATHEXT names only: os.access(X_OK) is true for any existing file on
         # Windows, so an extensionless file called `git` must not be picked.
+        # PATHEXT is a Windows variable and is always ';'-separated, whatever
+        # os.pathsep happens to be in the running interpreter.
         pathext = os.environ.get("PATHEXT", ".EXE;.CMD;.BAT;.COM")
-        names = ["git" + ext for ext in pathext.split(os.pathsep) if ext] or ["git.exe"]
+        names = ["git" + ext.strip() for ext in pathext.split(";") if ext.strip()] or ["git.exe"]
     for d in os.environ.get("PATH", "").split(os.pathsep):
         if not d or not os.path.isabs(d):
             continue

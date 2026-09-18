@@ -36,9 +36,9 @@ To run a piece by hand:
 python3 scripts/check_stop.py --config tests/fixtures/loop_config.json --results tests/fixtures/results.tsv
 #    -> {"stop": bool, "reason": str, "stats": {...}, "warnings": [...]}
 
-# run_trial.py on the tiny fixture eval (AUTOLOOP_FIXTURE_MODE=sleep|crash|gate for the other outcomes)
+# run_trial.py on the tiny fixture eval (AUTOLOOP_FIXTURE_MODE=sleep|crash|gate|fail for the other outcomes)
 (cd tests/fixtures/trialproj && python3 ../../../scripts/run_trial.py --config loop_config.json)
-#    -> {"ok": bool, "primary": ..., "counters": {...}, "timed_out": bool, "tail": [...]}
+#    -> {"ok": bool, "primary": ..., "counters": {...}, "timed_out": bool, "exit_code": int|null, "tail": [...]}
 
 # update_check.py (works from any path — it derives its own skill dir)
 python3 scripts/update_check.py --check-only
@@ -65,6 +65,7 @@ If you change loop behavior, add or update a case in the one that fits, and say 
 ## Pull requests
 
 - Keep them focused — one behavior change per PR.
+- Bump `metadata.version` in `SKILL.md`'s frontmatter whenever loop behaviour changes. It is the only version signal a non-git install has.
 - In the description, say **what loop behavior changes** and **why**, not just what files moved.
 - Small helper scripts stay stdlib-only and cross-platform (macOS / Linux / Windows).
 

@@ -6,6 +6,7 @@ AUTOLOOP_FIXTURE_MODE selects the scenario:
   crash  exits before printing the primary (with a non-ASCII byte in the message)
   gate   prints a counter value that violates the fixture's gate
   fail   prints the metrics, then exits 3
+  flood  prints far more than the tail budget, then the metrics
 """
 import os
 import sys
@@ -16,6 +17,9 @@ if mode == "sleep":
     time.sleep(30)
 if mode == "crash":
     sys.exit("boom: harness broke before printing caf\u00e9")
+if mode == "flood":
+    for _i in range(4000):
+        print("noise line %d padded out to make this log large" % _i)
 print("some noise line")
 print("runtime_ms: 123.4")
 print("tests_passed: 42")

@@ -2,7 +2,7 @@
 
 Nested quoting differs between /bin/sh and cmd.exe, so the checks point the
 extract command at this file instead of at `python -c "..."`.
-  emit.py two-lines | two-numbers | stderr-fail | inf | ok
+  emit.py two-lines | two-numbers | stderr-fail | stderr-ok | inf | ok
 """
 import sys
 
@@ -15,6 +15,9 @@ elif mode == "two-numbers":
 elif mode == "stderr-fail":
     sys.stderr.write("error 42\n")
     sys.exit(1)
+elif mode == "stderr-ok":
+    sys.stderr.write("stderr noise 999\n")
+    print("runtime_ms: 3.5")
 elif mode == "inf":
     print("runtime_ms: 1e999")
 else:
