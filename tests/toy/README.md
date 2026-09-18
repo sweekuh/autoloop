@@ -39,8 +39,10 @@ benches (small) on every CI platform, so they cannot silently rot.
 
 ## What each bench prints
 
-Every bench always exits 0. The loop reads the metric lines, never the exit
-code, and treats a missing primary line as a crash.
+Every bench exits 0 whenever it printed its metric lines, because `run_trial.py`
+files a non-zero exit as a crash: a failing check is reported through the metric
+line and the counter-metric gate, never through the exit code. A missing primary
+line is a crash too.
 
 `sortproj/bench.py`:
 
