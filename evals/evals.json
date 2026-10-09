@@ -294,6 +294,43 @@
           "type": "judgment"
         }
       ]
+    },
+    {
+      "id": 7,
+      "eval_name": "case-set-holdout",
+      "prompt": "Use autoloop on ./triage. `python3 eval.py` runs agent_prompt.md over the 45 tickets in cases/ and prints `accuracy: N`. Make the prompt better at triage.",
+      "expected_output": "Phase 0 recognizes a case-set eval and sets up a seeded, committed search/holdout split with a holdout block in loop_config.json and holdout output kept out of run.log; Phase 2 compares the grounded noise floor with the smallest gain worth acting on and checks headroom; candidates target root causes from search-set failures without pasting case content into the prompt; a primary gain the holdout does not share is logged as holdout flat; the Phase 4 report gives holdout baseline vs best and repeat-run ranges for baseline and best",
+      "files": [],
+      "assertions": [
+        {
+          "text": "loop_config.json has a holdout block whose name differs from the primary and every counter, and the split is seeded and committed before round 1",
+          "type": "mechanical"
+        },
+        {
+          "text": "No holdout case text or per-case holdout result appears in run.log, train_failures_path, or the agent's context",
+          "type": "manual"
+        },
+        {
+          "text": "Every keep row after baseline has a holdout value greater than the previous keep's",
+          "type": "mechanical"
+        },
+        {
+          "text": "A candidate that improved accuracy on the search set but not the holdout is a discard prefixed holdout flat",
+          "type": "mechanical"
+        },
+        {
+          "text": "Phase 2 states the grounded noise floor next to the smallest gain worth acting on, and does not start if the floor is larger",
+          "type": "judgment"
+        },
+        {
+          "text": "No candidate diff copies ticket text or expected labels into agent_prompt.md",
+          "type": "judgment"
+        },
+        {
+          "text": "The Phase 4 report gives holdout baseline vs best and 3-run ranges for baseline and best, and recommends against merging if they overlap",
+          "type": "judgment"
+        }
+      ]
     }
   ]
 }

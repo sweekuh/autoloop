@@ -667,6 +667,92 @@ check("SKILL.md shells out to run_trial.py and adjudicate.py",
 check("SKILL.md says the agent never writes a status label",
       "never write a status label" in _skill)
 
+# 11c. holdout: when the eval is a set of cases, a keep must improve a score
+#      on held-out cases the loop never sees as well as the primary. A primary
+#      gain the holdout does not share is overfitting, and it must be a
+#      discard the candidate generator can read as such, never a keep.
+_cfg_h = json.loads(json.dumps(_cfg))
+_cfg_h["holdout"] = {"name": "holdout_score", "extract": _pyq + " extract.py holdout_score", "direction": "max"}
+_cfgp_h = os.path.join(_proj, "loop_config-holdout.json")
+with io.open(_cfgp_h, "w", encoding="utf-8") as f:
+    f.write(json.dumps(_cfg_h))
+r = subprocess.run([PY, os.path.join(ROOT, "scripts", "run_trial.py"), "--config", _cfgp_h, "--cwd", _proj],
+                   capture_output=True, text=True, env=dict(os.environ, AUTOLOOP_FIXTURE_MODE="ok"))
+try:
+    t_h = json.loads(r.stdout.strip().splitlines()[-1])
+except Exception:
+    t_h = {"_stderr": r.stderr.strip()}
+check("run_trial.py extracts a declared holdout",
+      t_h.get("ok") is True and t_h.get("holdout") == 0.8, str(t_h))
+check("run_trial.py leaves holdout out when none is declared", "holdout" not in t_ok, str(t_ok))
+_saved_cfgp = _cfgp
+_cfgp = _cfgp_h
+_hres = os.path.join(_proj, "results-holdout.tsv")
+with io.open(_hres, "w", encoding="utf-8", newline="\n") as f:
+    f.write("round\tcandidate\tcommit\tprimary\tcounters\tstatus\tdescription\n")
+ah = adjudicate(_hres, 0, [{"candidate": "0", "commit": "-", "description": "baseline", "trial": dict(t_ok)}])
+check("adjudicate.py refuses a baseline whose holdout did not extract",
+      ah.get("rows") == [] and "holdout" in ah.get("reason", ""), str(ah))
+ah = adjudicate(_hres, 0, [{"candidate": "0", "commit": "-", "description": "baseline", "trial": t_h}])
+check("adjudicate.py logs the baseline holdout in the counters column",
+      ah.get("keep") == "0" and "holdout_score=0.8" in ah.get("rows", [""])[0], str(ah))
+with io.open(_hres, "a", encoding="utf-8", newline="\n") as f:
+    f.write("\n".join(ah.get("rows", [])) + "\n")
+ah = adjudicate(_hres, 1, [
+    {"candidate": "0", "commit": "h0", "description": "special-cases the search set", "trial": dict(t_h, primary=50.0, holdout=0.8)},
+    {"candidate": "1", "commit": "h1", "description": "root-cause fix", "trial": dict(t_h, primary=100.0, holdout=0.85)},
+    {"candidate": "2", "commit": "h2", "description": "holdout broke", "trial": dict(t_h, primary=40.0, holdout=None)},
+    {"candidate": "3", "commit": "h3", "description": "no gain", "trial": dict(t_h, primary=123.4, holdout=0.9)},
+])
+_hrows = ah.get("rows", [])
+check("adjudicate.py keeps the best primary among candidates that also improve the holdout",
+      ah.get("keep") == "1" and [ln.split("\t")[5] for ln in _hrows] == ["discard", "keep", "gate_fail", "discard"],
+      str(ah))
+check("adjudicate.py labels a primary gain the holdout did not share as holdout flat",
+      _hrows and _hrows[0].endswith("\tdiscard\tholdout flat (holdout_score=0.8 vs 0.8): special-cases the search set"),
+      str(_hrows[:1]))
+check("adjudicate.py files a candidate whose holdout did not extract as gate_fail",
+      len(_hrows) > 2 and "holdout holdout_score did not extract" in _hrows[2], str(_hrows))
+with io.open(_hres, "a", encoding="utf-8", newline="\n") as f:
+    f.write("\n".join(_hrows) + "\n")
+ah = adjudicate(_hres, 2, [{"candidate": "0", "commit": "h4", "description": "train only",
+                            "trial": dict(t_h, primary=90.0, holdout=0.85)}])
+check("adjudicate.py measures the holdout against the holdout at the last keep",
+      ah.get("keep") is None and "none improved holdout" in ah.get("reason", ""), str(ah))
+with io.open(_hres, "a", encoding="utf-8", newline="\n") as f:
+    f.write("\n".join(ah.get("rows", [])) + "\n")
+v = stop_verdict(_cfgp_h, _hres)
+check("check_stop.py accepts holdout rows adjudicate.py wrote, and reports the holdout",
+      v.get("warnings") == [] and v.get("stats", {}).get("best") == 100.0
+      and v.get("stats", {}).get("holdout_baseline") == 0.8 and v.get("stats", {}).get("holdout_best") == 0.85, str(v))
+_hbad = os.path.join(_proj, "results-holdout-bad.tsv")
+with io.open(_hbad, "w", encoding="utf-8", newline="\n") as f:
+    f.write("round\tcandidate\tcommit\tprimary\tcounters\tstatus\tdescription\n"
+            "0\t0\t-\t123.4\tholdout_score=0.8,tests_passed=42\tkeep\tbaseline\n"
+            "1\t0\tx\t50\tholdout_score=0.7,tests_passed=42\tkeep\tmislabeled: holdout fell\n"
+            "2\t0\ty\t40\ttests_passed=42\tkeep\tmislabeled: no holdout\n")
+v = stop_verdict(_cfgp_h, _hbad)
+check("check_stop.py refuses a keep whose holdout fell or is missing",
+      v.get("stats", {}).get("best") == 123.4
+      and any("does not improve" in w for w in v.get("warnings", []))
+      and any("no value for holdout" in w for w in v.get("warnings", [])), str(v))
+v = stop_verdict(_saved_cfgp, _hbad)
+check("check_stop.py ignores holdout values when no holdout is declared",
+      v.get("stats", {}).get("best") == 40.0 and "holdout_best" not in v.get("stats", {}), str(v))
+_cfg_hc = json.loads(json.dumps(_cfg_h))
+_cfg_hc["holdout"]["name"] = "tests_passed"
+_cfgp_hc = os.path.join(_proj, "loop_config-holdout-collide.json")
+with io.open(_cfgp_hc, "w", encoding="utf-8") as f:
+    f.write(json.dumps(_cfg_hc))
+v = stop_verdict(_cfgp_hc, _hres)
+check("check_stop.py refuses a holdout whose name collides with a counter",
+      v.get("stop") is True and "collides" in v.get("reason", ""), str(v))
+_cfgp = _cfgp_hc
+ah = adjudicate(_hres, 3, [{"candidate": "0", "commit": "z", "description": "x", "trial": t_h}])
+check("adjudicate.py refuses a holdout whose name collides with a counter",
+      ah.get("rows") == [] and "collides" in ah.get("reason", ""), str(ah))
+_cfgp = _saved_cfgp
+
 # 12. log_run.py must not dirty the skill checkout by default. A modified
 #     tracked file makes update_check.py return behind-dirty, which silently
 #     disabled self-update for every user after their first logged run.

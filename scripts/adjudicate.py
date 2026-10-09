@@ -45,6 +45,14 @@ the two scripts cannot disagree about what a keep is:
      (the best valid keep already in the results file) by at least the noise
      floor, max(min_delta, min_delta_pct% of best-so-far), strictly better when
      the floor is 0. Every other survivor is `discard`.
+     With a `holdout` declared, a survivor whose holdout did not extract is
+     `gate_fail`, and a keep must also improve the holdout over the holdout at
+     the previous keep by the holdout's own floor; the best primary among the
+     survivors that improve both is kept. A survivor that beat best-so-far on
+     the primary but not on the holdout is a `discard` prefixed
+     "holdout flat (...)": the gain did not generalize, which is what
+     overfitting to the search cases looks like. The holdout value is logged
+     in the counters column under the holdout's name.
   4. Round 0 is the baseline: exactly one candidate, kept if it ran and passes
      every gate. A baseline that fails a gate or crashes produces no row and a
      reason telling the agent to resolve the harness with the user first.
@@ -123,14 +131,17 @@ def fmt_counters(counters):
     return ",".join(items) if items else "-"
 
 
-def row(rnum, cand, status, description):
+def row(rnum, cand, status, description, holdout=None):
     trial = cand.get("trial") or {}
+    counters = dict(trial.get("counters") or {})
+    if holdout is not None and number(trial.get("holdout")) is not None:
+        counters[holdout["name"]] = trial["holdout"]
     return "\t".join([
         str(rnum),
         clean(cand.get("candidate"), 40),
         clean(cand.get("commit"), 64),
         fmt(trial.get("primary") if isinstance(trial, dict) else None),
-        fmt_counters(trial.get("counters")),
+        fmt_counters(counters),
         status,
         clean(description),
     ])
@@ -201,6 +212,9 @@ def run(args):
         if number(trial.get("primary")) is None:
             trial["primary"] = None
             trial["ok"] = False
+        h = number(trial.get("holdout"))
+        # Rounded like the primary, so the comparison uses the value the row holds.
+        trial["holdout"] = None if h is None else float(fmt(h))
     rules = check_stop.rules_from_config(cfg)
     direction = rules["direction"]
     if direction not in ("min", "max"):
@@ -209,12 +223,16 @@ def run(args):
                           "reason": "invalid config: primary.direction must be 'min' or 'max'",
                           "warnings": warnings}))
         return 0
+    if rules["holdout_error"]:
+        return empty(args.round, rules["holdout_error"], warnings)
     gates = rules["gates"]
+    holdout = rules["holdout"]
 
     rows_seen = check_stop.load_rows(args.results, warnings) if os.path.exists(args.results) else []
     rounds = check_stop.group_rounds(rows_seen, rules, warnings)
     series = check_stop.best_series(rounds, direction)
     best = series[-1] if series else None
+    href = check_stop.holdout_reference(rounds)
     if any(r["_round"] == args.round for r in rows_seen):
         # Reusing a round number would fold new candidates into an old round,
         # which patience and max_rounds count once. Re-running a crashed
@@ -270,7 +288,11 @@ def run(args):
             out["reason"] = ("baseline did not extract counter-metric(s) " + ", ".join(missing) +
                              "; fix the extract pattern with the user before looping")
             return finish()
-        out["rows"] = [row(0, cand, "keep", cand.get("description") or "baseline")]
+        if holdout is not None and trial.get("holdout") is None:
+            out["reason"] = (f"baseline did not extract holdout {holdout['name']}; "
+                             "fix the extract pattern with the user before looping")
+            return finish()
+        out["rows"] = [row(0, cand, "keep", cand.get("description") or "baseline", holdout)]
         out["keep"] = clean(cand.get("candidate"), 40)
         out["keep_commit"] = clean(cand.get("commit"), 64)
         out["reason"] = "baseline recorded"
@@ -308,21 +330,37 @@ def run(args):
             labelled.append((cand, "gate_fail", "gate_fail (" + ", ".join(missing) +
                              f" did not extract): {desc}"))
             continue
+        if holdout is not None and trial.get("holdout") is None:
+            # Same rule as a counter: an unevaluable holdout is not a passed one.
+            labelled.append((cand, "gate_fail", f"gate_fail (holdout {holdout['name']} did not extract): {desc}"))
+            continue
         survivors.append(cand)
         labelled.append((cand, None, desc))
 
+    def holdout_ok(cand):
+        return holdout is None or check_stop.holdout_improves(cand["trial"]["holdout"], href, holdout)
+
     keep = None
     top = None
-    if survivors:
-        key = (lambda c: c["_p"])
-        top = min(survivors, key=key) if direction == "min" else max(survivors, key=key)
-        if check_stop.improves(top["_p"], best, direction, floor):
-            keep = top
-            out["reason"] = (f"keep candidate {top['candidate']}: {top['_p']:.6g} beats "
-                             f"best-so-far {best:.6g} by at least the noise floor {floor:.6g}")
-        else:
-            out["reason"] = (f"no keep: best survivor {top['_p']:.6g} does not beat "
-                             f"best-so-far {best:.6g} by the noise floor {floor:.6g}")
+    key = (lambda c: c["_p"])
+    pick = min if direction == "min" else max
+    gainers = [c for c in survivors if check_stop.improves(c["_p"], best, direction, floor)]
+    eligible = [c for c in gainers if holdout_ok(c)]
+    if eligible:
+        keep = top = pick(eligible, key=key)
+        out["reason"] = (f"keep candidate {top['candidate']}: {top['_p']:.6g} beats "
+                         f"best-so-far {best:.6g} by at least the noise floor {floor:.6g}")
+        if holdout is not None and href is not None:
+            out["reason"] += (f", and holdout {holdout['name']} {top['trial']['holdout']:.6g} "
+                              f"improves on {href:.6g}")
+    elif gainers:
+        top = pick(gainers, key=key)
+        out["reason"] = (f"no keep: {len(gainers)} candidate(s) beat best-so-far on the primary but "
+                         f"none improved holdout {holdout['name']} on {href:.6g}")
+    elif survivors:
+        top = pick(survivors, key=key)
+        out["reason"] = (f"no keep: best survivor {top['_p']:.6g} does not beat "
+                         f"best-so-far {best:.6g} by the noise floor {floor:.6g}")
     else:
         out["reason"] = "no keep: every candidate crashed or failed a gate"
 
@@ -332,12 +370,17 @@ def run(args):
                 status = "keep"
             else:
                 status = "discard"
-                if keep is not None and check_stop.improves(cand["_p"], best, direction, floor):
+                if cand in gainers and not holdout_ok(cand):
+                    # A primary gain the held-out cases do not share did not
+                    # generalize: the overfitting signal, not a near miss.
+                    desc = (f"holdout flat ({holdout['name']}={cand['trial']['holdout']:.6g} "
+                            f"vs {href:.6g}): {desc}")
+                elif keep is not None and cand in gainers:
                     # An improvement that lost to a sibling is a live idea, not a dead end.
                     gap = abs(cand["_p"] - top["_p"])
                     inside = " inside the noise floor" if gap < floor else ""
                     desc = f"lost to {keep['candidate']}{inside}: {desc}"
-        out["rows"].append(row(args.round, cand, status, desc))
+        out["rows"].append(row(args.round, cand, status, desc, holdout))
     out["keep"] = keep["candidate"] if keep is not None else None
     out["keep_commit"] = clean(keep.get("commit"), 64) if keep is not None else None
     return finish()

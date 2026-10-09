@@ -63,6 +63,17 @@ kept from that point on.
 A config whose primary has no direction is refused with stop=true, because a
 guessed direction would keep the worst candidate instead of the best.
 
+An optional `holdout` block names a second score, computed by the eval on
+cases the loop never sees (a held-out test split). When it is declared, a keep
+must also improve the holdout over the holdout at the previous keep, by the
+holdout's own noise floor (strictly better at a floor of 0), and the value
+rides in the counters column under the holdout's name. A keep row with no
+holdout value, or one whose holdout did not improve, is warned about and
+treated as no keep, exactly like a gate violation. A primary gain the holdout
+does not share is the signature of overfitting to the search cases, so this
+can only end a run earlier. A holdout block that is malformed, or whose name
+collides with the primary or a counter, is refused with stop=true.
+
 This script is part of the frozen harness. The looping agent must not edit it.
 Backward compatible with a results.tsv that has no `round` column: each row is
 then treated as its own round.
@@ -232,15 +243,54 @@ def _nonneg_float(v):
     return max(0.0, f)
 
 
+def load_holdout(cfg, gates):
+    """(holdout rules or None, error or None) from the optional `holdout` block.
+
+    The holdout is a second score the eval computes on cases the loop never
+    sees. Its rules mirror the primary's: a direction, and a noise floor of
+    max(min_delta, min_delta_pct% of the reference holdout).
+    """
+    raw = cfg.get("holdout")
+    if raw is None:
+        return None, None
+    if not isinstance(raw, dict) or not raw.get("name"):
+        return None, "invalid config: holdout must be null or an object with a name"
+    direction = raw.get("direction")
+    if direction not in ("min", "max"):
+        return None, "invalid config: holdout.direction must be 'min' or 'max'"
+    name = clean_name(raw.get("name"))
+    primary_name = clean_name((cfg.get("primary") or {}).get("name") or "")
+    if name == primary_name or any(g[0] == name for g in gates) or any(
+            isinstance(cm, dict) and clean_name(cm.get("name") or "") == name
+            for cm in cfg.get("counter_metrics") or []):
+        return None, f"invalid config: holdout name {name!r} collides with the primary or a counter-metric"
+    return {"name": name, "direction": direction,
+            "min_delta": _nonneg_float(raw.get("min_delta")),
+            "min_delta_pct": _nonneg_float(raw.get("min_delta_pct"))}, None
+
+
+def holdout_improves(new, ref, holdout):
+    """True when holdout value `new` beats the reference by the holdout's noise floor."""
+    if new is None:
+        return False
+    if ref is None:
+        return True
+    return improves(new, ref, holdout["direction"], noise_floor(ref, holdout))
+
+
 def rules_from_config(cfg):
     """The subset of loop_config.json that decides what counts as a keep."""
     primary_cfg = cfg.get("primary", {})
     direction = primary_cfg.get("direction", cfg.get("direction"))
+    gates = load_gates(cfg)
+    holdout, holdout_error = load_holdout(cfg, gates)
     return {
         "direction": direction,
         "min_delta": _nonneg_float(cfg.get("min_delta")),
         "min_delta_pct": _nonneg_float(cfg.get("min_delta_pct")),
-        "gates": load_gates(cfg),
+        "gates": gates,
+        "holdout": holdout,
+        "holdout_error": holdout_error,
     }
 
 
@@ -287,15 +337,18 @@ def group_rounds(rows, rules, warnings):
     """
     direction = rules["direction"]
     gates = rules["gates"]
+    holdout = rules.get("holdout")
     buckets = {}
     for r in rows:
         buckets.setdefault(r["_round"], []).append(r)
     rounds = []
     best = None   # best VALID keep: what the run is credited with
     bar = None    # best keep row of any kind: the value a candidate must beat
+    hbar = None   # the same, for the holdout score
     for rnum in sorted(buckets):
         members = buckets[rnum]
         kept = None
+        kept_holdout = None
         keep_rows = [m for m in members if m["_status"] == "keep"]
         if len(keep_rows) > 1:
             # A round keeps at most one candidate. Two keep rows mean the log
@@ -328,6 +381,18 @@ def group_rounds(rows, rules, warnings):
                     f"{label}: keep row {m['_primary']:.6g} does not beat best-so-far "
                     f"{bar:.6g} by the noise floor {noise_floor(bar, rules):.6g}; treated as no keep")
                 continue
+            if holdout is not None:
+                hval = m["_counters"].get(holdout["name"])
+                if hval is None:
+                    warnings.append(f"{label}: keep row has no value for holdout {holdout['name']}; "
+                                    f"treated as no keep")
+                    continue
+                if not holdout_improves(hval, hbar, holdout):
+                    warnings.append(
+                        f"{label}: keep row holdout {holdout['name']}={hval:.6g} does not improve on "
+                        f"{hbar:.6g} by its noise floor {noise_floor(hbar, holdout):.6g}; treated as no keep")
+                    continue
+                kept_holdout = hval
             kept = m["_primary"]
             best = better(best, kept, direction)
         # A rejected keep still raises the bar for later rounds, never lowers
@@ -336,12 +401,28 @@ def group_rounds(rows, rules, warnings):
         for m in members:
             if m["_status"] == "keep" and m["_primary"] is not None:
                 bar = better(bar, m["_primary"], direction)
+                if holdout is not None:
+                    hbar = better(hbar, m["_counters"].get(holdout["name"]), holdout["direction"])
         rounds.append({
             "round": rnum,
             "kept": kept,
+            "kept_holdout": kept_holdout,
             "candidates": len(members),
         })
     return rounds
+
+
+def holdout_reference(rounds):
+    """The holdout score at the latest valid keep: the value a new keep must beat.
+
+    Every valid keep has to improve the holdout, so on an honest log the latest
+    is also the best.
+    """
+    ref = None
+    for rd in rounds:
+        if rd.get("kept_holdout") is not None:
+            ref = rd["kept_holdout"]
+    return ref
 
 
 def best_series(rounds, direction):
@@ -392,6 +473,8 @@ def run(args):
         return {"stop": True,
                 "reason": "invalid config: primary.direction must be 'min' or 'max'",
                 "stats": {}, "warnings": warnings}
+    if rules["holdout_error"]:
+        return {"stop": True, "reason": rules["holdout_error"], "stats": {}, "warnings": warnings}
     patience = _setting(cfg, "patience", 8, warnings, int)
     if patience < 1:
         warnings.append(f"config: patience={patience} is below 1; using 1")
@@ -438,6 +521,10 @@ def run(args):
     }
     if target is not None:
         stats["target"] = target
+    if rules["holdout"] is not None:
+        stats["holdout_baseline"] = next(
+            (rd["kept_holdout"] for rd in rounds if rd["kept_holdout"] is not None), None)
+        stats["holdout_best"] = holdout_reference(rounds)
     bar = None
     for r in rows:
         if r["_status"] == "keep" and r["_primary"] is not None:
