@@ -23,6 +23,7 @@ if mode == "flood":
 print("some noise line")
 print("runtime_ms: 123.4")
 print("tests_passed: 42")
+print("holdout_score: 0.8")
 if mode == "gate":
     print("tests_passed: 10")
 if mode == "fail":

@@ -9,11 +9,16 @@ script that reads loop_config.json, not out of the agent's reading of a log:
 
 It runs `eval_command` in --cwd (default: the current directory, which for a
 parallel candidate is its worktree) under `trial_timeout_seconds`, then runs
-the primary's and every counter-metric's `extract` command. It writes one
-JSON line:
+the primary's, the optional holdout's, and every counter-metric's `extract`
+command. It writes one JSON line:
 
   {"ok": bool, "primary": float|null, "counters": {name: float|null},
-   "timed_out": bool, "exit_code": int|null, "elapsed_s": float, "tail": [...]}
+   "holdout": float|null, "timed_out": bool, "exit_code": int|null,
+   "elapsed_s": float, "tail": [...]}
+
+`holdout` is present only when loop_config.json declares a `holdout` block. A
+holdout that does not extract leaves `ok` alone; adjudicate.py files that
+candidate as a `gate_fail`, because an unevaluable holdout is not a passed one.
 
 Rules, each of which closes a way for a mutated artifact to win by breaking
 the harness instead of improving the metric:
@@ -246,6 +251,9 @@ def run(args):
         if not name:
             continue
         result["counters"][str(name)] = extract(cm.get("extract"), cwd)
+    holdout_cfg = cfg.get("holdout")
+    if isinstance(holdout_cfg, dict):
+        result["holdout"] = extract(holdout_cfg.get("extract"), cwd)
     if code != 0:
         result["tail"].append(f"run_trial: eval_command exited {code}; a non-zero exit is a crash "
                               "(report a failing suite through a counter-metric, not the exit code)")
